@@ -71,6 +71,8 @@ Try commands such as:
 
 - “Which app is active?”
 - “Open Notes.”
+- “Open news.ycombinator.com in Arc.”
+- “Search for local AI news in Microsoft Edge.”
 - “Type: Call the dentist tomorrow morning.”
 - “Make the selected text shorter.”
 - “Replace the selection with the revised version.”
@@ -79,8 +81,9 @@ Try commands such as:
 Typing, selection replacement, Enter, Backspace, and Delete show a native
 confirmation first. The controller remembers the target app before displaying
 that prompt and returns focus to it before performing the action. Machine
-control accepts only six fixed actions; it cannot execute model-generated shell
-or AppleScript code.
+control accepts only fixed, server-implemented actions; it cannot execute
+model-generated shell or AppleScript code. Browser addresses and searches use
+dedicated navigation actions instead of typing into an arbitrary focused field.
 
 ## Quick start
 

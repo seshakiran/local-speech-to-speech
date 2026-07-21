@@ -42,7 +42,10 @@ const TOOL_USE_HINT =
   "as authoritative: claim success only when it contains ok=true. If it reports " +
   "an error, clearly say the action was not completed. When the user refers to " +
   "selected or highlighted text, call get_selected_text immediately. If they ask " +
-  "to rewrite it, use that result and then call replace_selected_text with the revision.";
+  "to rewrite it, use that result and then call replace_selected_text with the revision. " +
+  "For a website or browser search, use open_url or search_in_browser; never type " +
+  "an address into an unfocused window. Complete all obvious steps in one turn and " +
+  "do not ask for conversational permission between safe, reversible steps.";
 
 const STORAGE_KEYS = {
   // Direct s2s server URL, used only when the deploy has no LOAD_BALANCER_URL
@@ -144,16 +147,33 @@ const TOOL_DEFS = {
       text: { type: "string", description: "The exact replacement text." },
     }, required: ["text"] },
   },
+  open_url: {
+    type: "function", name: "open_url",
+    description: "Open an HTTP or HTTPS address as a real browser navigation. Use this instead of type_text for websites. It opens a browser tab and does not need a separate Enter call.",
+    parameters: { type: "object", properties: {
+      url: { type: "string", description: "Full URL or hostname, for example https://news.ycombinator.com." },
+      app: { type: "string", description: "Optional browser application name, for example Safari, Google Chrome, Microsoft Edge, or Arc." },
+    }, required: ["url"] },
+  },
+  search_in_browser: {
+    type: "function", name: "search_in_browser",
+    description: "Open a Google search results page in a browser. Completes the search immediately; do not type the query or press Enter separately.",
+    parameters: { type: "object", properties: {
+      query: { type: "string", description: "The exact search query." },
+      app: { type: "string", description: "Optional browser application name." },
+    }, required: ["query"] },
+  },
 };
 
 const MACHINE_TOOL_NAMES = [
   "get_active_app", "activate_app", "type_text", "press_key",
   "get_selected_text", "replace_selected_text",
+  "open_url", "search_in_browser",
 ];
 
 // Smaller local models sometimes produce a plausible synonym instead of the
 // exact declared function name. Normalise those calls at the trust boundary;
-// the server still receives only one of the six allowlisted actions.
+// the server still receives only an allowlisted action.
 const MACHINE_TOOL_ALIASES = {
   open_application: "activate_app",
   open_app: "activate_app",
@@ -167,6 +187,11 @@ const MACHINE_TOOL_ALIASES = {
   type_in_active_app: "type_text",
   type_text_in_active_app: "type_text",
   keyboard_press: "press_key",
+  open_website: "open_url",
+  navigate_to_url: "open_url",
+  navigate_browser: "open_url",
+  browser_search: "search_in_browser",
+  search_web_in_browser: "search_in_browser",
 };
 
 /** Convert common model synonyms and argument spellings to the strict API. */
@@ -186,6 +211,15 @@ function normaliseMachineTool(name, args) {
   }
   if (canonical === "press_key" && typeof normalised.key !== "string") {
     normalised.key = normalised.key_name || normalised.button;
+  }
+  if (canonical === "open_url" && typeof normalised.url !== "string") {
+    normalised.url = normalised.address || normalised.website || normalised.href;
+  }
+  if (["open_url", "search_in_browser"].includes(canonical) && typeof normalised.app !== "string") {
+    normalised.app = normalised.browser || normalised.application || normalised.application_name;
+  }
+  if (canonical === "search_in_browser" && typeof normalised.query !== "string") {
+    normalised.query = normalised.search || normalised.search_query || normalised.text;
   }
   return { name: canonical, args: normalised };
 }
@@ -399,6 +433,10 @@ const profileProvider = $("#profile-provider");
 let currentState = "idle";
 let settings = loadSettings();
 let userName = (localStorage.getItem(STORAGE_KEYS.userName) || "").trim();
+if (userName && !isPlausibleName(userName)) {
+  localStorage.removeItem(STORAGE_KEYS.userName);
+  userName = "";
+}
 /** @type {"idle" | "assistant-asking" | "awaiting-name" | "complete"} */
 let onboardingPhase = userName ? "complete" : "idle";
 let localConfig = { llmProvider: "local", llmModel: "Local model", sttModel: "Parakeet TDT", ttsModel: "Local voice" };
@@ -474,7 +512,15 @@ function nameFromTranscript(text) {
     .replace(/^(?:hi[,! ]+)?(?:my name is|i am|i'm|this is|call me)\s+/i, "")
     .replace(/[.!?,;:]+$/g, "")
     .trim();
-  return cleaned.split(/\s+/).slice(0, 4).join(" ").slice(0, 48);
+  const candidate = cleaned.split(/\s+/).slice(0, 4).join(" ").slice(0, 48);
+  return isPlausibleName(candidate) ? candidate : "";
+}
+
+function isPlausibleName(name) {
+  const value = name.trim();
+  if (!value || /[?]/.test(value)) return false;
+  if (/^(?:do|does|did|can|could|would|will|what|which|where|when|why|how|is|are|please|hello|hi|hey)\b/i.test(value)) return false;
+  return /^[\p{L}][\p{L}'’.-]*(?:\s+[\p{L}][\p{L}'’.-]*){0,3}$/u.test(value);
 }
 
 function saveUserName(name) {

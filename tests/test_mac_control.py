@@ -87,3 +87,32 @@ def test_selection_capture_clears_then_restores_clipboard():
     assert runner.calls[1][1]["input"] == b""
     assert commands[-1] == ["pbcopy"]
     assert runner.calls[-1][1]["input"] == b"previous clipboard"
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [
+        ("news.ycombinator.com", "https://news.ycombinator.com"),
+        ("https://example.com/path", "https://example.com/path"),
+    ],
+)
+def test_open_url_uses_launch_services(raw, expected):
+    runner = FakeRunner()
+    result = run(controller(runner), "open_url", {"url": raw, "app": "Safari"})
+    assert runner.calls[0][0] == ["open", "-a", "Safari", expected]
+    assert result["url"] == expected
+
+
+@pytest.mark.parametrize("url", ["file:///etc/passwd", "javascript:alert(1)", "https://user:pass@example.com"])
+def test_open_url_rejects_unsafe_schemes_and_credentials(url):
+    with pytest.raises(mac_control.ControlError, match="HTTP and HTTPS"):
+        run(controller(), "open_url", {"url": url})
+
+
+def test_browser_search_encodes_query():
+    runner = FakeRunner()
+    result = run(controller(runner), "search_in_browser", {"query": "top five Hacker News", "app": "Arc"})
+    assert runner.calls[0][0] == [
+        "open", "-a", "Arc", "https://www.google.com/search?q=top+five+Hacker+News"
+    ]
+    assert result["ok"] is True

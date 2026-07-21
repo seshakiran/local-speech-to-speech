@@ -11,6 +11,7 @@ import subprocess
 import time
 from dataclasses import dataclass
 from typing import Any, Callable
+from urllib.parse import quote_plus, urlsplit, urlunsplit
 
 
 class ControlError(RuntimeError):
@@ -61,6 +62,8 @@ class MacController:
             "press_key": self.press_key,
             "get_selected_text": self.get_selected_text,
             "replace_selected_text": self.replace_selected_text,
+            "open_url": self.open_url,
+            "search_in_browser": self.search_in_browser,
         }
         handler = handlers.get(action)
         if handler is None:
@@ -150,6 +153,51 @@ class MacController:
             raise ControlError("Invalid application name.")
         self.runner(["open", "-a", app], check=True, capture_output=True, text=True, timeout=10)
         return {"ok": True, "message": f"Activated {app}."}
+
+    @staticmethod
+    def _url(value: Any) -> str:
+        if not isinstance(value, str) or not value.strip():
+            raise ControlError("URL cannot be empty.")
+        raw = value.strip()
+        initial = urlsplit(raw)
+        if initial.scheme and initial.scheme not in {"http", "https"}:
+            raise ControlError("Only public-style HTTP and HTTPS URLs are allowed.")
+        if not initial.scheme:
+            raw = "https://" + raw
+        if len(raw) > 2_048:
+            raise ControlError("URL is too long.")
+        parts = urlsplit(raw)
+        if parts.scheme not in {"http", "https"} or not parts.hostname or parts.username or parts.password:
+            raise ControlError("Only public-style HTTP and HTTPS URLs are allowed.")
+        return urlunsplit(parts)
+
+    def open_url(self, url: str, app: str | None = None) -> dict[str, Any]:
+        """Open a URL through Launch Services, which gives browsers a real tab.
+
+        This intentionally does not fake navigation by typing into whichever UI
+        control happens to have focus.
+        """
+        url = self._url(url)
+        command = ["open"]
+        target = "the default browser"
+        if app:
+            app = self._text(app).strip()
+            if len(app) > 120 or any(ch in app for ch in "\r\n\0"):
+                raise ControlError("Invalid application name.")
+            command.extend(["-a", app])
+            target = app
+        command.append(url)
+        self.runner(command, check=True, capture_output=True, text=True, timeout=10)
+        return {"ok": True, "message": f"Opened {url} in {target}.", "url": url, "app": target}
+
+    def search_in_browser(self, query: str, app: str | None = None) -> dict[str, Any]:
+        query = self._text(query).strip()
+        if len(query) > 1_000:
+            raise ControlError("Search query is too long.")
+        result = self.open_url(f"https://www.google.com/search?q={quote_plus(query)}", app)
+        result["message"] = f"Opened a browser search for: {query}"
+        result["query"] = query
+        return result
 
     def type_text(self, text: str) -> dict[str, Any]:
         text = self._text(text)

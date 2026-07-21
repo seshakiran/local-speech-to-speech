@@ -70,9 +70,10 @@ Grant it in **System Settings → Privacy & Security → Accessibility** and
 the already-running process.
 
 The available actions are deliberately limited to reading the active app,
-activating an app, typing text, pressing an approved key, reading selected text,
-and replacing selected text. Typing, replacing, Enter, Backspace, and Delete
-display a native confirmation. There is no arbitrary shell-command endpoint.
+activating an app, typing text, pressing an approved key, reading or replacing
+selected text, and opening validated web addresses or searches in a browser.
+Typing, replacing, Enter, Backspace, and Delete display a native confirmation.
+There is no arbitrary shell-command endpoint.
 
 For reliable targeting, put focus in the destination field before speaking.
 When confirmation is required, the app records that destination, shows the
