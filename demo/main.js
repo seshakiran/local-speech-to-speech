@@ -24,6 +24,7 @@ import { ChatView } from "./ui/chat.js";
 import { Account } from "./ui/account.js";
 
 const DEFAULT_VOICE = "Aiden";
+const DEFAULT_LOCAL_S2S_URL = "ws://127.0.0.1:8765/v1/realtime";
 const DEFAULT_INSTRUCTIONS =
   "You are a private local voice assistant running on the user's Mac. " +
   "Be warm, perceptive, and conversational. Keep spoken replies concise. " +
@@ -166,7 +167,7 @@ const SNAPSHOT_LADDER = /** @type {[number, number][]} */ ([
 
 function loadSettings() {
   return {
-    directUrl: localStorage.getItem(STORAGE_KEYS.directUrl) || "",
+    directUrl: localStorage.getItem(STORAGE_KEYS.directUrl) || DEFAULT_LOCAL_S2S_URL,
     voice: localStorage.getItem(STORAGE_KEYS.voice) || DEFAULT_VOICE,
     instructions: localStorage.getItem(STORAGE_KEYS.instructions) || DEFAULT_INSTRUCTIONS,
     noiseGate: loadGateThreshold(),
@@ -1100,9 +1101,9 @@ function connectionTarget() {
   if (!allowDirect) {
     return { sessionUrl: "api/session" };
   }
-  const directUrl = buildDirectWsUrl(pinnedUrl || settings.directUrl);
+  const directUrl = buildDirectWsUrl(pinnedUrl || settings.directUrl || DEFAULT_LOCAL_S2S_URL);
   if (!directUrl) {
-    throw new Error("Enter a speech-to-speech server URL in Settings.");
+    throw new Error("The local speech backend address is invalid.");
   }
   return { directUrl };
 }

@@ -61,7 +61,7 @@ cleanup() {
 }
 trap cleanup EXIT INT TERM
 
-echo "Starting the fully local speech pipeline on ws://localhost:8765/v1/realtime"
+echo "Starting the fully local speech pipeline on ws://127.0.0.1:8765/v1/realtime"
 echo "LLM: $S2S_LLM_MODEL via $S2S_LLM_PROVIDER"
 echo "Offline mode enabled: VAD, STT, LLM, and TTS must load from local caches."
 export HF_HUB_OFFLINE=1
@@ -93,5 +93,5 @@ done
 
 echo "Speech backend is ready."
 echo "Starting the orb interface at http://localhost:7860"
-SPEECH_TO_SPEECH_URL=ws://localhost:8765/v1/realtime \
+SPEECH_TO_SPEECH_URL=ws://127.0.0.1:8765/v1/realtime \
   .venv/bin/uvicorn --app-dir demo server:app --host 127.0.0.1 --port 7860

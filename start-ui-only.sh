@@ -11,5 +11,5 @@ if [[ -f "$MODEL_CONFIG" ]]; then
   set +a
 fi
 
-SPEECH_TO_SPEECH_URL="${SPEECH_TO_SPEECH_URL:-ws://localhost:8765/v1/realtime}" \
+SPEECH_TO_SPEECH_URL="${SPEECH_TO_SPEECH_URL:-ws://127.0.0.1:8765/v1/realtime}" \
   .venv/bin/uvicorn --app-dir demo server:app --host 127.0.0.1 --port 7860

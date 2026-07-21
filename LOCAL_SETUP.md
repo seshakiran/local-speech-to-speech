@@ -99,6 +99,6 @@ vision model/backend supports image input.
 ## Installed environment
 
 - Python environment: `.venv` (managed with `uv`)
-- Backend address: `ws://localhost:8765/v1/realtime`
+- Backend address: `ws://127.0.0.1:8765/v1/realtime` (built in by default)
 - Browser interface: `http://localhost:7860`
 - Git repository: `https://github.com/seshakiran/local-speech-to-speech.git`
