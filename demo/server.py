@@ -26,6 +26,7 @@ Endpoints:
   GET  /api/config           -> { search, lb, allowDirect, s2sUrl, rtc, iceServers, auth }
   GET  /api/me               -> login + tier + remaining budget (LB mode only)
   POST /api/search           -> { results, answer }  Google via Serper.dev
+  POST /api/control          -> validated local macOS action (loopback only)
   POST /api/calls            -> proxies the WebRTC SDP offer to <s2s>/v1/realtime/calls
   POST /api/session          -> proxies <LB>/session: a grant, or a queue ticket
   GET  /api/queue/{id}       -> proxies <LB>/queue/{id}: position, or a grant on claim
@@ -45,15 +46,17 @@ import asyncio
 import json
 import logging
 import os
+import platform
 from urllib.parse import urlsplit, urlunsplit
 
 import auth
 import httpx
 import limiter
+from mac_control import ControlError, controller
 from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 logger = logging.getLogger("s2s.search")
 
@@ -79,6 +82,9 @@ if SPEECH_TO_SPEECH_URL:
 # but nothing is metered: no budget, no reservations, no sign-in gating.
 SPACE_ID = os.environ.get("SPACE_ID", "").strip()
 LIMITER_ENABLED = bool(LOAD_BALANCER_URL) and bool(SPACE_ID)
+# Never expose desktop automation from a hosted deployment. Requests are also
+# restricted to loopback below, providing defense in depth for local use.
+MACHINE_CONTROL_ENABLED = platform.system() == "Darwin" and not SPACE_ID
 
 
 def _parse_ice_servers(raw: str) -> list:
@@ -158,6 +164,11 @@ class SearchRequest(BaseModel):
     key: str | None = None
 
 
+class ControlRequest(BaseModel):
+    action: str
+    arguments: dict = Field(default_factory=dict)
+
+
 @app.get("/api/config")
 def config():
     """Client bootstrap: whether web search is available, whether the deploy runs
@@ -182,6 +193,7 @@ def config():
         "llmModel": os.environ.get("S2S_LLM_MODEL", "local model"),
         "sttModel": "Parakeet TDT 0.6B",
         "ttsModel": "Qwen3-TTS 1.7B · 6-bit",
+        "machineControl": MACHINE_CONTROL_ENABLED,
     }
 
 
@@ -266,6 +278,29 @@ async def search(req: SearchRequest):
         answer = kg.get("description") or None
 
     return JSONResponse({"query": query, "answer": answer, "results": results})
+
+
+def _is_loopback(request: Request) -> bool:
+    host = request.client.host if request.client else ""
+    return host in {"127.0.0.1", "::1", "testclient"}
+
+
+@app.post("/api/control")
+async def machine_control(req: ControlRequest, request: Request):
+    """Execute one validated macOS action from the same-machine browser UI.
+
+    The model supplies only an action name and data arguments. AppleScript and
+    executable names are fixed server-side in ``mac_control.py``.
+    """
+    if not MACHINE_CONTROL_ENABLED or not _is_loopback(request):
+        raise HTTPException(status_code=404, detail="Not found.")
+    origin = request.headers.get("origin", "")
+    if origin and urlsplit(origin).hostname not in {"localhost", "127.0.0.1", "::1"}:
+        raise HTTPException(status_code=403, detail="Machine control requires a localhost origin.")
+    try:
+        return await asyncio.to_thread(controller.execute_user_action, req.action, req.arguments)
+    except ControlError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @app.post("/api/calls")

@@ -57,6 +57,30 @@ The browser UI and realtime API also bind to `127.0.0.1`. With model weights alr
 - **Transparent configuration:** the UI shows the active LLM, provider, speech models, transport, and privacy state.
 - **Offline-safe transport:** WebSocket is the default because localhost survives when Wi-Fi is disabled.
 - **Modular foundation:** VAD, STT, LLM, and TTS remain replaceable.
+- **Safe Mac control:** optional allowlisted tools can type, edit selections,
+  press safe keys, and activate apps without exposing a general-purpose shell.
+
+## Control your Mac by voice
+
+Open **Tools** in the local interface and enable **Control this Mac**. The first
+action prompts macOS for permission. Allow the application that launched the
+server (normally Terminal) under **System Settings → Privacy & Security →
+Accessibility** and, when requested, **Automation → System Events**.
+
+Try commands such as:
+
+- “Which app is active?”
+- “Open Notes.”
+- “Type: Call the dentist tomorrow morning.”
+- “Make the selected text shorter.”
+- “Replace the selection with the revised version.”
+- “Press Tab.”
+
+Typing, selection replacement, Enter, Backspace, and Delete show a native
+confirmation first. The controller remembers the target app before displaying
+that prompt and returns focus to it before performing the action. Machine
+control accepts only six fixed actions; it cannot execute model-generated shell
+or AppleScript code.
 
 ## Quick start
 
@@ -142,6 +166,8 @@ Browser echo cancellation works best when microphone and speaker output belong t
 - Added WebRTC lifecycle and browser audio improvements.
 - Reworked the UI around local privacy and active model configuration.
 - Added spoken name onboarding and local-only personalization.
+- Added an optional loopback-only macOS action broker with a strict tool
+  allowlist and native confirmations for consequential actions.
 - Removed external fonts and hosted-service branding from the runtime UI.
 
 For additional setup details, see [LOCAL_SETUP.md](LOCAL_SETUP.md).

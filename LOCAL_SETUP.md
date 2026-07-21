@@ -61,6 +61,23 @@ For the best acoustic echo cancellation, keep microphone input and speaker
 output on the same audio device. An external microphone listening to the Mac's
 speakers creates a physical echo path that browser cancellation may not remove.
 
+## Control the active Mac application
+
+Open the wrench-shaped **Tools** panel and enable **Control this Mac**. macOS may
+ask the launcher (usually Terminal) for permission to control System Events.
+Grant it in **System Settings → Privacy & Security → Accessibility** and
+**Automation**. Restart the launcher if macOS does not apply the permission to
+the already-running process.
+
+The available actions are deliberately limited to reading the active app,
+activating an app, typing text, pressing an approved key, reading selected text,
+and replacing selected text. Typing, replacing, Enter, Backspace, and Delete
+display a native confirmation. There is no arbitrary shell-command endpoint.
+
+For reliable targeting, put focus in the destination field before speaking.
+When confirmation is required, the app records that destination, shows the
+prompt, then restores focus before executing the approved action.
+
 ## Run the UI separately
 
 If the realtime backend is already running:

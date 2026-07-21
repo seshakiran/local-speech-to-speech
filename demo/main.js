@@ -99,7 +99,51 @@ const TOOL_DEFS = {
       "asks you to look.",
     parameters: { type: "object", properties: {}, required: [] },
   },
+  get_active_app: {
+    type: "function", name: "get_active_app",
+    description: "Return the name of the currently focused macOS application.",
+    parameters: { type: "object", properties: {}, required: [] },
+  },
+  activate_app: {
+    type: "function", name: "activate_app",
+    description: "Open or bring a named macOS application to the foreground.",
+    parameters: { type: "object", properties: {
+      app: { type: "string", description: "Application name, for example Notes or Safari." },
+    }, required: ["app"] },
+  },
+  type_text: {
+    type: "function", name: "type_text",
+    description: "Type exact text into the currently focused field. The user sees a native confirmation before typing.",
+    parameters: { type: "object", properties: {
+      text: { type: "string", description: "The exact text to type, without commentary or quotation marks." },
+    }, required: ["text"] },
+  },
+  press_key: {
+    type: "function", name: "press_key",
+    description: "Press one allowed keyboard key in the active app. Enter and deletion require confirmation.",
+    parameters: { type: "object", properties: {
+      key: { type: "string", enum: ["enter", "tab", "space", "backspace", "escape", "left", "right", "up", "down"] },
+      modifiers: { type: "array", items: { type: "string", enum: ["command", "control", "option", "shift"] } },
+    }, required: ["key"] },
+  },
+  get_selected_text: {
+    type: "function", name: "get_selected_text",
+    description: "Read the text currently selected in the active macOS application while restoring the clipboard afterward.",
+    parameters: { type: "object", properties: {}, required: [] },
+  },
+  replace_selected_text: {
+    type: "function", name: "replace_selected_text",
+    description: "Replace the current selection with exact text after showing the user a native confirmation.",
+    parameters: { type: "object", properties: {
+      text: { type: "string", description: "The exact replacement text." },
+    }, required: ["text"] },
+  },
 };
+
+const MACHINE_TOOL_NAMES = [
+  "get_active_app", "activate_app", "type_text", "press_key",
+  "get_selected_text", "replace_selected_text",
+];
 
 /** Longest edge of the snapshot sent to the VLM, in px (keeps payload sane). */
 const SNAPSHOT_MAX_EDGE = 768;
@@ -154,7 +198,7 @@ function saveSettings(s) {
   localStorage.setItem(STORAGE_KEYS.transport, s.transport);
 }
 
-/** @returns {{ web_search: boolean, camera_snapshot: boolean }} */
+/** @returns {{ web_search: boolean, camera_snapshot: boolean, machine_control: boolean }} */
 function loadTools() {
   try {
     const raw = JSON.parse(localStorage.getItem(STORAGE_KEYS.tools) || "{}");
@@ -165,9 +209,10 @@ function loadTools() {
     return {
       web_search: raw.web_search ?? true,
       camera_snapshot: raw.camera_snapshot ?? true,
+      machine_control: raw.machine_control ?? false,
     };
   } catch {
-    return { web_search: true, camera_snapshot: true };
+    return { web_search: true, camera_snapshot: true, machine_control: false };
   }
 }
 
@@ -245,12 +290,16 @@ const toolsClose = $("#tools-close");
 const toolWebSwitch = $("#tool-web");
 /** @type {HTMLInputElement} */
 const toolCamSwitch = $("#tool-cam");
+/** @type {HTMLInputElement} */
+const toolMachineSwitch = $("#tool-machine");
 /** @type {HTMLElement} */
 const toolWebRow = $("#tool-web-row");
 /** @type {HTMLElement} */
 const toolWebHint = $("#tool-web-hint");
 /** @type {HTMLElement} */
 const toolCamHint = $("#tool-cam-hint");
+/** @type {HTMLElement} */
+const toolMachineHint = $("#tool-machine-hint");
 /** @type {HTMLInputElement} */
 const searchKeyInput = $("#search-key");
 /** @type {HTMLElement} */
@@ -340,6 +389,7 @@ let activeTransport = "ws";
 
 // ── Tool state ──────────────────────────────────────────────────────────────
 let toolsEnabled = loadTools();
+let machineControlAvailable = false;
 // Whether the server holds a Serper key (learned from /api/config on load).
 let serverSearchKey = false;
 // A user-supplied key (fallback when the deploy has none). localStorage only.
@@ -357,6 +407,9 @@ function activeToolDefs() {
   const defs = [];
   if (toolsEnabled.web_search && searchAvailable()) defs.push(TOOL_DEFS.web_search);
   if (toolsEnabled.camera_snapshot) defs.push(TOOL_DEFS.camera_snapshot);
+  if (toolsEnabled.machine_control && machineControlAvailable) {
+    for (const name of MACHINE_TOOL_NAMES) defs.push(TOOL_DEFS[name]);
+  }
   return defs;
 }
 
@@ -683,6 +736,11 @@ function syncToolsUi() {
   toolWebSwitch.disabled = !avail;
   toolWebRow.classList.toggle("disabled", !avail);
   toolCamSwitch.checked = toolsEnabled.camera_snapshot;
+  toolMachineSwitch.checked = toolsEnabled.machine_control && machineControlAvailable;
+  toolMachineSwitch.disabled = !machineControlAvailable;
+  toolMachineHint.textContent = machineControlAvailable
+    ? "Uses macOS Accessibility locally. Typing, replacement, Enter, and deletion ask first."
+    : "Available only from the local macOS server.";
 
   if (serverSearchKey) {
     // Key lives server-side: show it as configured, never expose it.
@@ -737,6 +795,12 @@ toolCamSwitch.addEventListener("change", async () => {
     toolsEnabled.camera_snapshot = false;
     toolCamHint.textContent = "Let the assistant see through your webcam.";
   }
+  saveTools();
+  pushToolsToSession();
+});
+
+toolMachineSwitch.addEventListener("change", () => {
+  toolsEnabled.machine_control = toolMachineSwitch.checked && machineControlAvailable;
   saveTools();
   pushToolsToSession();
 });
@@ -924,6 +988,9 @@ async function runTool(name, argsJson, callId) {
         result.output = "The camera is not available right now.";
         client.sendToolOutput(callId, result.output);
       }
+    } else if (MACHINE_TOOL_NAMES.includes(name)) {
+      result.output = await execMachineControl(name, args);
+      client.sendToolOutput(callId, result.output);
     } else {
       result.output = `Unknown tool: ${name}`;
       client.sendToolOutput(callId, result.output);
@@ -938,6 +1005,18 @@ async function runTool(name, argsJson, callId) {
   // it) so it's in context for the reply. Other tools: a bare create.
   client.requestResponse(result.image ? { image: result.image } : undefined);
   return result;
+}
+
+/** Execute one fixed, server-validated macOS action on localhost. */
+async function execMachineControl(action, args) {
+  const res = await fetch("api/control", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ action, arguments: args }),
+  });
+  const json = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(json.detail || `machine control error (${res.status})`);
+  return JSON.stringify(json);
 }
 
 /** @param {string} query @returns {Promise<string>} */
@@ -978,6 +1057,7 @@ async function fetchConfig() {
     if (res.ok) {
       const json = await res.json();
       serverSearchKey = !!json.search;
+      machineControlAvailable = !!json.machineControl;
       lbMode = !!json.lb;
       // Lock to LB mode only when the deploy reports a load balancer.
       allowDirect = json.allowDirect ?? !lbMode;
