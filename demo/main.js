@@ -37,7 +37,12 @@ const TOOL_USE_HINT =
   " When the user's request calls for one of your tools, do not describe your " +
   "capabilities or say you can do it and wait for another turn. Instead, say " +
   'a brief acknowledgement like "Let me search for that..." and call the tool ' +
-  "right away in the same response.";
+  "right away in the same response. Use only the exact tool names provided; " +
+  "never invent a general os_tools or open_application tool. Treat tool output " +
+  "as authoritative: claim success only when it contains ok=true. If it reports " +
+  "an error, clearly say the action was not completed. When the user refers to " +
+  "selected or highlighted text, call get_selected_text immediately. If they ask " +
+  "to rewrite it, use that result and then call replace_selected_text with the revision.";
 
 const STORAGE_KEYS = {
   // Direct s2s server URL, used only when the deploy has no LOAD_BALANCER_URL
@@ -145,6 +150,45 @@ const MACHINE_TOOL_NAMES = [
   "get_active_app", "activate_app", "type_text", "press_key",
   "get_selected_text", "replace_selected_text",
 ];
+
+// Smaller local models sometimes produce a plausible synonym instead of the
+// exact declared function name. Normalise those calls at the trust boundary;
+// the server still receives only one of the six allowlisted actions.
+const MACHINE_TOOL_ALIASES = {
+  open_application: "activate_app",
+  open_app: "activate_app",
+  launch_application: "activate_app",
+  get_active_application: "get_active_app",
+  active_application: "get_active_app",
+  read_selected_text: "get_selected_text",
+  get_highlighted_text: "get_selected_text",
+  read_highlighted_text: "get_selected_text",
+  replace_highlighted_text: "replace_selected_text",
+  type_in_active_app: "type_text",
+  type_text_in_active_app: "type_text",
+  keyboard_press: "press_key",
+};
+
+/** Convert common model synonyms and argument spellings to the strict API. */
+function normaliseMachineTool(name, args) {
+  let canonical = MACHINE_TOOL_ALIASES[name] || name;
+  const operation = typeof args.action === "string" ? args.action
+    : (typeof args.operation === "string" ? args.operation : "");
+  if (name === "os_tools") {
+    canonical = MACHINE_TOOL_ALIASES[operation] || operation || "get_active_app";
+  }
+  const normalised = { ...args };
+  if (canonical === "activate_app" && typeof normalised.app !== "string") {
+    normalised.app = normalised.application || normalised.application_name || normalised.app_name || normalised.name;
+  }
+  if (["type_text", "replace_selected_text"].includes(canonical) && typeof normalised.text !== "string") {
+    normalised.text = normalised.content || normalised.value || normalised.replacement || normalised.replacement_text;
+  }
+  if (canonical === "press_key" && typeof normalised.key !== "string") {
+    normalised.key = normalised.key_name || normalised.button;
+  }
+  return { name: canonical, args: normalised };
+}
 
 /** Longest edge of the snapshot sent to the VLM, in px (keeps payload sane). */
 const SNAPSHOT_MAX_EDGE = 768;
@@ -962,6 +1006,13 @@ async function runTool(name, argsJson, callId) {
   let args = /** @type {Record<string, unknown>} */ ({});
   try { args = JSON.parse(argsJson || "{}"); } catch { /* keep {} */ }
 
+  const normalised = normaliseMachineTool(name, args);
+  if (normalised.name !== name) {
+    if (DEBUG) console.debug(`[tool] normalised ${name} -> ${normalised.name}`);
+    name = normalised.name;
+    args = normalised.args;
+  }
+
   if (DEBUG) console.debug(`[tool] run name=${name} callId=${JSON.stringify(callId)} args=${argsJson}`);
   if (!callId) console.warn("[tool] empty call_id — the backend didn't tag the call, can't return a function_call_output");
 
@@ -993,12 +1044,12 @@ async function runTool(name, argsJson, callId) {
       result.output = await execMachineControl(name, args);
       client.sendToolOutput(callId, result.output);
     } else {
-      result.output = `Unknown tool: ${name}`;
+      result.output = `ERROR: Unknown tool '${name}'. The requested action was not performed. Do not claim success.`;
       client.sendToolOutput(callId, result.output);
     }
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
-    result.output = `Tool failed: ${msg}`;
+    result.output = `ERROR: Tool failed: ${msg}. The requested action was not performed. Do not claim success.`;
     client.sendToolOutput(callId, result.output);
   }
   if (DEBUG) console.debug(`[tool] requesting model response after ${name}`);
