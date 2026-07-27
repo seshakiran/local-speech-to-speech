@@ -55,6 +55,7 @@ The browser UI and realtime API also bind to `127.0.0.1`. With model weights alr
 - **Realtime voice:** streaming transcription, response generation, and speech synthesis.
 - **Lower-latency speech:** streamed LLM output is sent to TTS sentence by sentence by default.
 - **Optional wake word:** keep the mic open but only answer after phrases such as “hey Alice.”
+- **Optional service-backed lip sync:** hand completed assistant audio to a local video renderer and play the returned MP4 avatar response.
 - **Personal from the first hello:** the assistant asks for your name by voice and remembers it only in browser local storage.
 - **Transparent configuration:** the UI shows the active LLM, provider, speech models, transport, and privacy state.
 - **Offline-safe transport:** WebSocket is the default because localhost survives when Wi-Fi is disabled.
@@ -160,6 +161,23 @@ S2S_MEMORY_MAX_PROMPT_ITEMS=8
 
 When enabled, phrases like “remember that my preferred editor is Neovim” are
 stored locally and relevant facts are injected into later LLM prompts.
+
+Real lip sync requires a separate local renderer such as a Wav2Lip- or
+MuseTalk-style service. Enable the integration by setting:
+
+```dotenv
+S2S_LIPSYNC_URL=http://127.0.0.1:9000/lipsync
+```
+
+When configured, the WebSocket UI stops immediate assistant audio playback,
+collects the completed response as a WAV file, posts multipart/form-data to
+`/api/lipsync`, and plays the returned MP4 in the avatar ring. The upstream
+service should accept `audio`, `transcript`, `response_id`, and `avatar` fields
+and return either `video/mp4` bytes or JSON containing `video_url`/`url`.
+
+This mode trades realtime latency for real rendered video. WebRTC mode still
+uses the regular Alice-style loops because its assistant audio arrives as a
+remote media track rather than discrete TTS chunks.
 
 Supported providers:
 

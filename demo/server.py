@@ -26,6 +26,7 @@ Endpoints:
   GET  /api/config           -> { search, lb, allowDirect, s2sUrl, rtc, iceServers, auth }
   GET  /api/me               -> login + tier + remaining budget (LB mode only)
   POST /api/search           -> { results, answer }  Google via Serper.dev
+  POST /api/lipsync          -> proxies completed assistant audio to a local lip-sync renderer
   POST /api/control          -> validated local macOS action (loopback only)
   POST /api/calls            -> proxies the WebRTC SDP offer to <s2s>/v1/realtime/calls
   POST /api/session          -> proxies <LB>/session: a grant, or a queue ticket
@@ -61,6 +62,7 @@ from pydantic import BaseModel, Field
 logger = logging.getLogger("s2s.search")
 
 SERPER_KEY = os.environ.get("SERPER_API_KEY", "").strip()
+LIPSYNC_URL = os.environ.get("S2S_LIPSYNC_URL", "").strip()
 # Speech-to-speech load balancer URL. When set, the browser POSTs /api/session
 # (which proxies <lb>/session here, server-side) and connects to the URL the LB
 # returns (the original flow). The LB address itself is never sent to the browser.
@@ -197,6 +199,8 @@ def config():
         "wakeWord": os.environ.get("S2S_WAKE_WORD_ENABLED", "false").lower() == "true",
         "customTools": os.environ.get("S2S_CUSTOM_TOOLS_ENABLED", "false").lower() == "true",
         "memory": os.environ.get("S2S_MEMORY_ENABLED", "false").lower() == "true",
+        "lipSync": bool(LIPSYNC_URL),
+        "lipSyncEndpoint": "api/lipsync" if LIPSYNC_URL else "",
     }
 
 
@@ -281,6 +285,40 @@ async def search(req: SearchRequest):
         answer = kg.get("description") or None
 
     return JSONResponse({"query": query, "answer": answer, "results": results})
+
+
+@app.post("/api/lipsync")
+async def lipsync(request: Request):
+    """Proxy a completed assistant turn to a local lip-sync renderer.
+
+    Expected client payload is multipart/form-data with:
+      - audio: WAV file of the assistant response
+      - transcript: assistant text, when available
+      - avatar: avatar identifier such as "alice"
+
+    The upstream service should return either video/mp4 bytes or JSON with
+    ``video_url``/``url``. We forward the body without parsing it so FastAPI
+    does not need python-multipart installed in this demo process."""
+    if not LIPSYNC_URL:
+        raise HTTPException(status_code=404, detail="Not found.")
+
+    body = await request.body()
+    headers = {
+        "Content-Type": request.headers.get("content-type", "application/octet-stream"),
+        "Accept": "video/mp4,application/json",
+    }
+    try:
+        async with httpx.AsyncClient(timeout=300.0) as http:
+            resp = await http.post(LIPSYNC_URL, headers=headers, content=body)
+    except httpx.RequestError as exc:
+        logger.warning("lip-sync service unreachable: %r", exc)
+        raise HTTPException(status_code=502, detail="Lip-sync service unreachable.")
+
+    return Response(
+        content=resp.content,
+        status_code=resp.status_code,
+        media_type=resp.headers.get("content-type", "video/mp4"),
+    )
 
 
 def _is_loopback(request: Request) -> bool:

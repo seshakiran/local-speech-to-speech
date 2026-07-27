@@ -65,6 +65,9 @@
  *   executes and replies via `sendToolOutput` + `requestResponse`.
  * @property {NoiseGate} [noiseGate] Client-side noise gate applied to the mic
  *   before it's sent. Tunable live via `setNoiseGate`.
+ * @property {boolean} [lipSync] Collect completed assistant audio and emit it
+ *   as WAV for a service-backed lip-sync renderer instead of streaming it
+ *   directly to the speaker worklet.
  *
  * @typedef {Object} NoiseGate
  * @property {boolean} enabled
@@ -109,6 +112,61 @@ const OUTPUT_SAMPLE_RATE = 16000;
 const MIC_CHUNK_MS = 40;
 const PLAYBACK_END_HANG_MS = 300;
 
+/** @param {Float32Array[]} chunks */
+function concatFloat32(chunks) {
+  const total = chunks.reduce((n, chunk) => n + chunk.length, 0);
+  const out = new Float32Array(total);
+  let offset = 0;
+  for (const chunk of chunks) {
+    out.set(chunk, offset);
+    offset += chunk.length;
+  }
+  return out;
+}
+
+/** @param {Float32Array} samples @param {number} sampleRate */
+function wavBlobFromFloat32(samples, sampleRate) {
+  const bytesPerSample = 2;
+  const dataSize = samples.length * bytesPerSample;
+  const buffer = new ArrayBuffer(44 + dataSize);
+  const view = new DataView(buffer);
+  const writeString = (offset, value) => {
+    for (let i = 0; i < value.length; i++) view.setUint8(offset + i, value.charCodeAt(i));
+  };
+  writeString(0, "RIFF");
+  view.setUint32(4, 36 + dataSize, true);
+  writeString(8, "WAVE");
+  writeString(12, "fmt ");
+  view.setUint32(16, 16, true);
+  view.setUint16(20, 1, true);
+  view.setUint16(22, 1, true);
+  view.setUint32(24, sampleRate, true);
+  view.setUint32(28, sampleRate * bytesPerSample, true);
+  view.setUint16(32, bytesPerSample, true);
+  view.setUint16(34, 8 * bytesPerSample, true);
+  writeString(36, "data");
+  view.setUint32(40, dataSize, true);
+  let offset = 44;
+  for (const sample of samples) {
+    const clamped = Math.max(-1, Math.min(1, sample));
+    view.setInt16(offset, clamped < 0 ? clamped * 0x8000 : clamped * 0x7fff, true);
+    offset += 2;
+  }
+  return new Blob([buffer], { type: "audio/wav" });
+}
+
+/** @param {string} b64 */
+function pcm16Base64ToFloat32(b64) {
+  const bytes = base64ToBytes(b64);
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  const samples = new Float32Array(bytes.byteLength / 2);
+  for (let i = 0; i < samples.length; i++) {
+    const s = view.getInt16(i * 2, true);
+    samples[i] = s < 0 ? s / 0x8000 : s / 0x7fff;
+  }
+  return samples;
+}
+
 export class S2sWsRealtimeClient extends EventTarget {
   /** @param {WsClientOptions} options */
   constructor(options) {
@@ -117,6 +175,7 @@ export class S2sWsRealtimeClient extends EventTarget {
     this.options = options;
     /** @type {ToolDef[]} Function tools declared to the backend. */
     this._tools = options.tools ?? [];
+    this._lipSync = !!options.lipSync;
     /** @type {string} Direct realtime WS URL (set => skip the LB session POST). */
     this._directUrl = options.directUrl ?? "";
     /** @type {string} Where to POST for the session handshake. Prefer the
@@ -171,6 +230,8 @@ export class S2sWsRealtimeClient extends EventTarget {
     this._aiSpeaking = false;
     this._pendingAudioResponseId = "";
     this._playbackEndTimer = 0;
+    /** @type {Map<string, Float32Array[]>} */
+    this._lipSyncAudioByResp = new Map();
     /** @type {Set<string>} response_ids that have actually played audio, so the
      * UI can tell a barge-in cut (keep it) from a never-heard speculative
      * response (drop it). */
@@ -681,6 +742,7 @@ export class S2sWsRealtimeClient extends EventTarget {
         }
         this._aiSpeaking = false;
         this._pendingAudioResponseId = "";
+        this._lipSyncAudioByResp.clear();
         this._setStatus("user-speaking");
         break;
 
@@ -706,9 +768,9 @@ export class S2sWsRealtimeClient extends EventTarget {
 
       case "response.audio.delta":
       case "response.output_audio.delta": {
-        this._pushAudioDelta(event.delta);
         const rid = event.response_id ?? event.response?.id;
         if (rid) this._pendingAudioResponseId = rid;
+        this._pushAudioDelta(event.delta, rid);
         if (!this._aiSpeaking && (this._status === "connected" || this._status === "user-speaking")) {
           this._setStatus("processing");
         }
@@ -729,9 +791,6 @@ export class S2sWsRealtimeClient extends EventTarget {
         // This response freed the slot (completion OR cancellation both arrive
         // as response.done). Decrement and, if a create was waiting, replay it.
         this._openResponses = Math.max(0, this._openResponses - 1);
-        if (this._status === "processing" || (this._status === "ai-speaking" && !this._aiSpeaking)) {
-          this._setStatus("connected");
-        }
         // A response closes here for BOTH normal completion and cancellation
         // (the s2s server signals a speculative-turn interrupt as
         // `response.done` with status "cancelled" — there is no separate
@@ -739,9 +798,14 @@ export class S2sWsRealtimeClient extends EventTarget {
         // drop a cancelled response's transcript and commit a completed one.
         const status = event.response?.status ?? "completed";
         const responseId = event.response?.id ?? "";
+        const lipSyncChunks = responseId ? this._lipSyncAudioByResp.get(responseId) : null;
+        const willRenderLipSync = this._lipSync && status !== "cancelled" && !!lipSyncChunks?.length;
+        if (!willRenderLipSync && (this._status === "processing" || (this._status === "ai-speaking" && !this._aiSpeaking))) {
+          this._setStatus("connected");
+        }
         // Did this response ever play audio? Distinguishes a barge-in cut (the
         // user heard part of it) from a speculative response that never played.
-        const audible = responseId ? this._audibleResponses.has(responseId) : false;
+        const audible = willRenderLipSync || (responseId ? this._audibleResponses.has(responseId) : false);
         this._audibleResponses.delete(responseId);
         // Pull whatever transcript the response carries, falling back to the
         // segments we concatenated from the `*.transcript.done` events (plus any
@@ -757,6 +821,16 @@ export class S2sWsRealtimeClient extends EventTarget {
         this.dispatchEvent(new CustomEvent("response-finished", {
           detail: { responseId, status, audible, transcript },
         }));
+        if (willRenderLipSync && lipSyncChunks) {
+          this.dispatchEvent(new CustomEvent("lipsync-audio", {
+            detail: {
+              responseId,
+              transcript,
+              audio: wavBlobFromFloat32(concatFloat32(lipSyncChunks), OUTPUT_SAMPLE_RATE),
+            },
+          }));
+        }
+        if (responseId) this._lipSyncAudioByResp.delete(responseId);
         // The slot is free now — replay a queued create (e.g. a tool follow-up
         // that arrived while this response was still running).
         this._flushQueuedCreate();
@@ -891,17 +965,18 @@ export class S2sWsRealtimeClient extends EventTarget {
     }
   }
 
-  /** @param {string} b64 */
-  _pushAudioDelta(b64) {
-    if (!this._playbackNode) return;
+  /** @param {string} b64 @param {string} [responseId] */
+  _pushAudioDelta(b64, responseId = "") {
     if (!b64) return;
-    const bytes = base64ToBytes(b64);
-    const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
-    const samples = new Float32Array(bytes.byteLength / 2);
-    for (let i = 0; i < samples.length; i++) {
-      const s = view.getInt16(i * 2, true);
-      samples[i] = s < 0 ? s / 0x8000 : s / 0x7fff;
+    const samples = pcm16Base64ToFloat32(b64);
+    if (this._lipSync) {
+      const rid = responseId || this._pendingAudioResponseId || "__unknown";
+      const chunks = this._lipSyncAudioByResp.get(rid) || [];
+      chunks.push(samples);
+      this._lipSyncAudioByResp.set(rid, chunks);
+      return;
     }
+    if (!this._playbackNode) return;
     this._playbackNode.port.postMessage({ kind: "audio", samples }, [samples.buffer]);
   }
 
@@ -1111,6 +1186,7 @@ export class S2sWsRealtimeClient extends EventTarget {
       clearTimeout(this._playbackEndTimer);
       this._playbackEndTimer = 0;
     }
+    this._lipSyncAudioByResp.clear();
     try {
       if (this._ws && this._ws.readyState <= WebSocket.OPEN) {
         this._ws.close(1000, "client closed");
