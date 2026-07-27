@@ -51,6 +51,7 @@ from speech_to_speech.arguments_classes.websocket_streamer_arguments import WebS
 from speech_to_speech.arguments_classes.whisper_stt_arguments import WhisperSTTHandlerArguments
 from speech_to_speech.baseHandler import BaseHandler
 from speech_to_speech.LLM.chat import Chat
+from speech_to_speech.memory.local_memory import LocalMemoryStore
 from speech_to_speech.pipeline.cancel_scope import CancelScope
 from speech_to_speech.pipeline.handler_types import LLMIn, LLMOut, STTIn, STTOut, TTSIn, TTSOut
 from speech_to_speech.pipeline.queue_types import (
@@ -65,6 +66,7 @@ from speech_to_speech.pipeline.queue_types import (
 )
 from speech_to_speech.pipeline.speculative_turns import SpeculativeTurnTracker
 from speech_to_speech.STT.transcription_notifier import TranscriptionNotifier
+from speech_to_speech.tools.custom_tools import CustomToolError, CustomToolRegistry
 from speech_to_speech.utils.thread_manager import ThreadManager
 from speech_to_speech.VAD.vad_handler import VADHandler
 
@@ -348,6 +350,34 @@ def initialize_queues_and_events() -> dict[str, Any]:
     }
 
 
+def _build_custom_tool_registry(module_kwargs: ModuleArguments) -> CustomToolRegistry | None:
+    if not module_kwargs.custom_tools_enabled:
+        return None
+    try:
+        registry = CustomToolRegistry.from_file(
+            module_kwargs.custom_tools_path,
+            default_timeout_s=module_kwargs.custom_tools_timeout_s,
+        )
+    except CustomToolError as exc:
+        raise ValueError(f"Failed to load custom tools: {exc}") from exc
+    if registry.enabled_names:
+        logger.info("Loaded custom tools: %s", ", ".join(sorted(registry.enabled_names)))
+    else:
+        logger.info("Custom tools enabled, but no enabled tools were found in %s", module_kwargs.custom_tools_path)
+    return registry
+
+
+def _build_memory_store(module_kwargs: ModuleArguments) -> LocalMemoryStore | None:
+    if not module_kwargs.memory_enabled:
+        return None
+    store = LocalMemoryStore(
+        module_kwargs.memory_path,
+        max_prompt_items=module_kwargs.memory_max_prompt_items,
+    )
+    logger.info("Local memory enabled at %s", module_kwargs.memory_path)
+    return store
+
+
 def _build_pipeline_handlers(
     *,
     stop_event: Event,
@@ -524,6 +554,11 @@ def _build_realtime_pipeline_unit(
         should_listen=should_listen,
         chat_size=chat_size,
         speculative_turns=speculative_turns,
+        wake_word_enabled=module_kwargs.wake_word_enabled,
+        wake_words=module_kwargs.wake_words,
+        wake_word_strip=module_kwargs.wake_word_strip,
+        custom_tools=_build_custom_tool_registry(module_kwargs),
+        memory_store=_build_memory_store(module_kwargs),
     )
 
     if module_kwargs.enable_live_transcription:
@@ -709,11 +744,15 @@ def build_pipeline(
         "should_listen": should_listen,
         "runtime_config": RuntimeConfig(
             chat=Chat(_lm_vars.get("chat_size", 30)),
+            memory_store=_build_memory_store(module_kwargs),
             session=RealtimeSessionCreateRequest(
                 type="realtime",
                 instructions=_lm_vars.get("init_chat_prompt"),
             ),
         ),
+        "wake_word_enabled": module_kwargs.wake_word_enabled,
+        "wake_words": module_kwargs.wake_words,
+        "wake_word_strip": module_kwargs.wake_word_strip,
     }
 
     pipeline_handlers = _build_pipeline_handlers(

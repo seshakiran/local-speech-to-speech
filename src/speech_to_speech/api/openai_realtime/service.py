@@ -1,3 +1,4 @@
+import json
 import logging
 from collections.abc import Mapping
 from queue import Queue
@@ -30,7 +31,11 @@ from openai.types.realtime import (
     SessionCreatedEvent,
     SessionUpdateEvent,
 )
+from openai.types.realtime.realtime_conversation_item_function_call_output import (
+    RealtimeConversationItemFunctionCallOutput,
+)
 from openai.types.realtime.realtime_response_create_params import RealtimeResponseCreateParams
+from openai.types.responses import ResponseFunctionToolCall
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from speech_to_speech.api.openai_realtime.handlers import (
@@ -54,6 +59,8 @@ from speech_to_speech.pipeline.events import (
 from speech_to_speech.pipeline.messages import GenerateResponseRequest
 from speech_to_speech.pipeline.queue_types import TextPromptItem
 from speech_to_speech.pipeline.speculative_turns import SpeculativeTurnTracker
+from speech_to_speech.pipeline.wake_word import apply_wake_word_gate
+from speech_to_speech.tools.custom_tools import CustomToolError, CustomToolRegistry, merge_tool_specs
 from speech_to_speech.utils.utils import _generate_id
 
 logger = logging.getLogger(__name__)
@@ -186,6 +193,7 @@ class ConnState(BaseModel):
     # write-back (cross-thread), so they are buffered here and flushed in order
     # once the response completes. See ConversationHandler.flush_deferred_items.
     deferred_items: list[ConversationItem] = Field(default_factory=list)
+    pending_custom_tool_outputs: list[RealtimeConversationItemFunctionCallOutput] = Field(default_factory=list)
 
 
 class RealtimeService:
@@ -202,11 +210,21 @@ class RealtimeService:
         should_listen: ThreadingEvent | None = None,
         chat_size: int = 10,
         speculative_turns: SpeculativeTurnTracker | None = None,
+        wake_word_enabled: bool = False,
+        wake_words: str = "hey alice",
+        wake_word_strip: bool = True,
+        custom_tools: CustomToolRegistry | None = None,
+        memory_store: Any | None = None,
     ) -> None:
         self.text_prompt_queue = text_prompt_queue
         self.should_listen = should_listen
         self._chat_size = chat_size
         self.speculative_turns = speculative_turns
+        self.wake_word_enabled = wake_word_enabled
+        self.wake_words = wake_words
+        self.wake_word_strip = wake_word_strip
+        self.custom_tools = custom_tools
+        self.memory_store = memory_store
         self._conns: dict[str, ConnState] = {}
         self.total_usage = GlobalUsageMetrics()
 
@@ -231,6 +249,8 @@ class RealtimeService:
         if self.speculative_turns:
             self.speculative_turns.reset()
         state = ConnState(runtime_config=RuntimeConfig(chat=Chat(self._chat_size)))
+        state.runtime_config.memory_store = self.memory_store
+        self._merge_custom_tools_into_session(state.runtime_config)
         self._conns[state.session_id] = state
         self.total_usage.connections += 1
         return state.session_id
@@ -253,6 +273,17 @@ class RealtimeService:
 
     def _state(self, conn_id: str) -> ConnState:
         return self._conns[conn_id]
+
+    def _merge_custom_tools_into_session(self, cfg: RuntimeConfig) -> None:
+        if self.custom_tools is None:
+            return
+        specs = self.custom_tools.tool_specs()
+        if not specs:
+            return
+        cfg.session.tools = merge_tool_specs(cfg.session.tools, specs)  # type: ignore[assignment]
+
+    def apply_custom_tools(self, conn_id: str) -> None:
+        self._merge_custom_tools_into_session(self._state(conn_id).runtime_config)
 
     @property
     def connection_ids(self) -> list[str]:
@@ -362,7 +393,7 @@ class RealtimeService:
 
         self._observe_turn_event(event)
         if isinstance(event, AssistantTextEvent):
-            return self.response.on_assistant_text(
+            return self._on_assistant_text(
                 conn_id,
                 event,
                 wait_for_pending_reopen=wait_for_pending_reopen,
@@ -372,6 +403,78 @@ class RealtimeService:
             logger.debug("Unhandled pipeline event type: %s", type(event).__name__)
             return []
         return handler(conn_id, event)
+
+    def _on_assistant_text(
+        self,
+        conn_id: str,
+        event: AssistantTextEvent,
+        *,
+        wait_for_pending_reopen: bool,
+    ) -> list[ServerEvent] | None:
+        local_tools, external_tools = self._split_custom_tools(event.tools)
+        event_for_client = event.model_copy(update={"tools": external_tools})
+        events = self.response.on_assistant_text(
+            conn_id,
+            event_for_client,
+            wait_for_pending_reopen=wait_for_pending_reopen,
+        )
+        if events is None:
+            return None
+        if local_tools:
+            self._execute_custom_tools(conn_id, local_tools)
+        return events
+
+    def _split_custom_tools(
+        self,
+        tools: list[ResponseFunctionToolCall],
+    ) -> tuple[list[ResponseFunctionToolCall], list[ResponseFunctionToolCall]]:
+        if self.custom_tools is None or not tools:
+            return [], tools
+        local: list[ResponseFunctionToolCall] = []
+        external: list[ResponseFunctionToolCall] = []
+        for tool in tools:
+            if self.custom_tools.has_tool(tool.name):
+                local.append(tool)
+            else:
+                external.append(tool)
+        return local, external
+
+    def _execute_custom_tools(self, conn_id: str, tools: list[ResponseFunctionToolCall]) -> None:
+        if self.custom_tools is None:
+            return
+        st = self._state(conn_id)
+        for tool in tools:
+            try:
+                output = self.custom_tools.execute(tool.name, tool.arguments)
+            except CustomToolError as exc:
+                logger.info("Custom tool %s failed: %s", tool.name, exc)
+                output = json.dumps({"success": False, "error": str(exc)}, ensure_ascii=False)
+            st.pending_custom_tool_outputs.append(
+                RealtimeConversationItemFunctionCallOutput(
+                    type="function_call_output",
+                    call_id=tool.call_id,
+                    output=output,
+                )
+            )
+
+    def flush_custom_tool_outputs(self, conn_id: str) -> list[ServerEvent]:
+        st = self._state(conn_id)
+        if not st.pending_custom_tool_outputs:
+            return []
+
+        outputs = st.pending_custom_tool_outputs
+        st.pending_custom_tool_outputs = []
+        events: list[ServerEvent] = []
+        appended = False
+        for output in outputs:
+            before = len(events)
+            events.extend(self.conversation._apply_item(conn_id, output))
+            appended = appended or len(events) > before and not isinstance(events[-1], RealtimeErrorEvent)
+
+        if appended and self.text_prompt_queue is not None:
+            st.response_pending = True
+            self.text_prompt_queue.put(GenerateResponseRequest(runtime_config=st.runtime_config))
+        return events
 
     def _is_stale_turn_event(self, event: PipelineEvent, *, wait_for_pending_reopen: bool = True) -> bool | None:
         if self.speculative_turns is None:
@@ -419,14 +522,31 @@ class RealtimeService:
 
         cfg = st.runtime_config
         transcript = event.transcript
+        gate = apply_wake_word_gate(
+            transcript,
+            self.wake_words,
+            enabled=self.wake_word_enabled,
+            strip_wake_word=self.wake_word_strip,
+        )
+        response_transcript = gate.transcript if gate.activated else ""
         if transcript:
-            if same_speculative_turn and st.speculative_user_item_id:
-                replaced = cfg.chat.replace_user_message_text(st.speculative_user_item_id, transcript)
+            if not gate.activated:
+                logger.info("Wake word not detected; ignoring transcript")
+                if same_speculative_turn and st.speculative_user_item_id:
+                    cfg.chat.remove_user_message(st.speculative_user_item_id)
+                    st.speculative_user_item_id = None
+            elif not response_transcript:
+                logger.info("Wake word detected without command text")
+                if same_speculative_turn and st.speculative_user_item_id:
+                    cfg.chat.remove_user_message(st.speculative_user_item_id)
+                    st.speculative_user_item_id = None
+            elif same_speculative_turn and st.speculative_user_item_id:
+                replaced = cfg.chat.replace_user_message_text(st.speculative_user_item_id, response_transcript)
                 if not replaced:
-                    item = cfg.chat.add_item(make_user_message(transcript))
+                    item = cfg.chat.add_item(make_user_message(response_transcript))
                     st.speculative_user_item_id = item.id
-            else:
-                item = cfg.chat.add_item(make_user_message(transcript))
+            elif gate.activated:
+                item = cfg.chat.add_item(make_user_message(response_transcript))
                 st.speculative_user_item_id = item.id
         elif same_speculative_turn and st.speculative_user_item_id:
             cfg.chat.remove_user_message(st.speculative_user_item_id)
@@ -440,7 +560,10 @@ class RealtimeService:
             st.speculative_user_speech_stopped_at_s = event.speech_stopped_at_s
 
         queue = self.text_prompt_queue
-        if queue and transcript:
+        if queue and response_transcript:
+            cfg.last_user_transcript = response_transcript
+            if cfg.memory_store is not None:
+                cfg.memory_store.remember_from_transcript(response_transcript)
             st.response_pending = True
             queue.put(
                 GenerateResponseRequest(
@@ -451,6 +574,9 @@ class RealtimeService:
                     speech_stopped_at_s=event.speech_stopped_at_s,
                 )
             )
+        elif self.should_listen is not None:
+            st.response_pending = False
+            self.should_listen.set()
 
         return events
 

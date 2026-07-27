@@ -24,10 +24,10 @@ class LanguageModelBaseArguments:
         metadata={"help": "Number of interactions assistant-user to keep for the chat."},
     )
     stream_batch_sentences: int = field(
-        default=3,
+        default=1,
         metadata={
             "help": "Number of sentences to accumulate before yielding a batch during streaming. "
-            "Set to 1 for sentence-by-sentence streaming. Default is 3."
+            "Set to 1 for sentence-by-sentence streaming. Default is 1."
         },
     )
     enable_lang_prompt: bool = field(

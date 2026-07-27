@@ -36,6 +36,15 @@ def test_release_defaults_match_responses_api_parakeet_qwen3_realtime_profile():
     assert module_args.log_level == "info"
     assert module_args.enable_live_transcription is True
     assert module_args.live_transcription_update_interval == 0.5
+    assert module_args.wake_word_enabled is False
+    assert module_args.wake_words == "hey alice"
+    assert module_args.wake_word_strip is True
+    assert module_args.custom_tools_enabled is False
+    assert module_args.custom_tools_path == "user-customization/custom-tools.json"
+    assert module_args.custom_tools_timeout_s == 10.0
+    assert module_args.memory_enabled is False
+    assert module_args.memory_path == "user-customization/memories.json"
+    assert module_args.memory_max_prompt_items == 8
 
     assert vad_args.thresh == 0.6
     assert vad_args.min_silence_ms == 64
@@ -44,6 +53,7 @@ def test_release_defaults_match_responses_api_parakeet_qwen3_realtime_profile():
     assert vad_args.realtime_processing_pause == 0.5
     assert responses_api_args.model_name == "gpt-5.4-mini"
     assert responses_api_args.chat_size == 30
+    assert responses_api_args.stream_batch_sentences == 1
     assert responses_api_args.responses_api_stream is True
     assert qwen3_args.qwen3_tts_model_name == "Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice"
     assert qwen3_args.qwen3_tts_speaker == "Aiden"

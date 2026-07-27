@@ -256,6 +256,8 @@ class ResponseHandler(RealtimeBaseHandler):
         # is cleared and the generation's own write-back has landed. Done outside
         # the in_response guard so a stray terminal call still drains the buffer.
         events.extend(self._service.conversation.flush_deferred_items(conn_id))
+        if status == "completed":
+            events.extend(self._service.flush_custom_tool_outputs(conn_id))
         return events
 
     # ── Pipeline event handlers ───────────────────

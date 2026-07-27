@@ -52,10 +52,10 @@ from urllib.parse import urlsplit, urlunsplit
 import auth
 import httpx
 import limiter
-from mac_control import ControlError, controller
 from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
+from mac_control import ControlError, controller
 from pydantic import BaseModel, Field
 
 logger = logging.getLogger("s2s.search")
@@ -194,6 +194,9 @@ def config():
         "sttModel": "Parakeet TDT 0.6B",
         "ttsModel": "Qwen3-TTS 1.7B · 6-bit",
         "machineControl": MACHINE_CONTROL_ENABLED,
+        "wakeWord": os.environ.get("S2S_WAKE_WORD_ENABLED", "false").lower() == "true",
+        "customTools": os.environ.get("S2S_CUSTOM_TOOLS_ENABLED", "false").lower() == "true",
+        "memory": os.environ.get("S2S_MEMORY_ENABLED", "false").lower() == "true",
     }
 
 

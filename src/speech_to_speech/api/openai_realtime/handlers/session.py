@@ -48,6 +48,7 @@ class SessionHandler(RealtimeBaseHandler):
             cfg.session = s
         else:
             cfg.apply_session_update(s)
+        self._service.apply_custom_tools(conn_id)
         logger.info("Session configuration updated")
         return None
 

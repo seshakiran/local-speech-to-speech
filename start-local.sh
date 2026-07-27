@@ -56,6 +56,41 @@ case "$S2S_LLM_PROVIDER" in
     ;;
 esac
 
+typeset -a WAKE_ARGS
+if [[ "${S2S_WAKE_WORD_ENABLED:-false}" == "true" ]]; then
+  WAKE_ARGS=(
+    --wake_word_enabled true
+    --wake_words "${S2S_WAKE_WORDS:-hey alice}"
+  )
+  if [[ "${S2S_WAKE_WORD_STRIP:-true}" == "false" ]]; then
+    WAKE_ARGS+=(--wake_word_strip false)
+  fi
+else
+  WAKE_ARGS=()
+fi
+
+typeset -a CUSTOM_TOOL_ARGS
+if [[ "${S2S_CUSTOM_TOOLS_ENABLED:-false}" == "true" ]]; then
+  CUSTOM_TOOL_ARGS=(
+    --custom_tools_enabled true
+    --custom_tools_path "${S2S_CUSTOM_TOOLS_PATH:-user-customization/custom-tools.json}"
+    --custom_tools_timeout_s "${S2S_CUSTOM_TOOLS_TIMEOUT_S:-10}"
+  )
+else
+  CUSTOM_TOOL_ARGS=()
+fi
+
+typeset -a MEMORY_ARGS
+if [[ "${S2S_MEMORY_ENABLED:-false}" == "true" ]]; then
+  MEMORY_ARGS=(
+    --memory_enabled true
+    --memory_path "${S2S_MEMORY_PATH:-user-customization/memories.json}"
+    --memory_max_prompt_items "${S2S_MEMORY_MAX_PROMPT_ITEMS:-8}"
+  )
+else
+  MEMORY_ARGS=()
+fi
+
 cleanup() {
   [[ -n "${BACKEND_PID:-}" ]] && kill "$BACKEND_PID" 2>/dev/null || true
 }
@@ -75,6 +110,9 @@ export DO_NOT_TRACK=1
   --stt parakeet-tdt \
   "${LLM_ARGS[@]}" \
   --tts qwen3 \
+  "${WAKE_ARGS[@]}" \
+  "${CUSTOM_TOOL_ARGS[@]}" \
+  "${MEMORY_ARGS[@]}" \
   --qwen3_tts_mlx_quantization 6bit \
   --enable_live_transcription \
   --ws_host 127.0.0.1 \

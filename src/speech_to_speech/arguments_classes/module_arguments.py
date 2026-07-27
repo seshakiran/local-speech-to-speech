@@ -70,3 +70,42 @@ class ModuleArguments:
             "num_pipelines; further connections are rejected. Only valid for --mode realtime. Default is 1."
         },
     )
+    wake_word_enabled: bool = field(
+        default=False,
+        metadata={
+            "help": "When True, final transcripts must contain one of --wake_words before the assistant responds. "
+            "The final transcription event is still emitted to clients."
+        },
+    )
+    wake_words: str = field(
+        default="hey alice",
+        metadata={"help": "Comma-separated transcript wake phrases, e.g. 'hey alice,okay assistant'."},
+    )
+    wake_word_strip: bool = field(
+        default=True,
+        metadata={"help": "When True, remove the matched wake phrase before sending the user text to the LLM."},
+    )
+    custom_tools_enabled: bool = field(
+        default=False,
+        metadata={"help": "Enable local Python custom tools loaded from --custom_tools_path."},
+    )
+    custom_tools_path: str = field(
+        default="user-customization/custom-tools.json",
+        metadata={"help": "Path to a JSON array of local custom tool definitions."},
+    )
+    custom_tools_timeout_s: float = field(
+        default=10.0,
+        metadata={"help": "Default timeout in seconds for local custom tool scripts."},
+    )
+    memory_enabled: bool = field(
+        default=False,
+        metadata={"help": "Enable lightweight local memory for explicit 'remember that ...' user facts."},
+    )
+    memory_path: str = field(
+        default="user-customization/memories.json",
+        metadata={"help": "Path to the local JSON memory store."},
+    )
+    memory_max_prompt_items: int = field(
+        default=8,
+        metadata={"help": "Maximum remembered facts injected into each LLM prompt."},
+    )

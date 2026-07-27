@@ -12,6 +12,7 @@ from speech_to_speech.pipeline.events import PartialTranscriptionEvent, Transcri
 from speech_to_speech.pipeline.handler_types import LLMIn, STTOut
 from speech_to_speech.pipeline.messages import GenerateResponseRequest, PartialTranscription, Transcription
 from speech_to_speech.pipeline.queue_types import TextEventItem
+from speech_to_speech.pipeline.wake_word import apply_wake_word_gate
 
 logger = logging.getLogger(__name__)
 
@@ -34,10 +35,16 @@ class TranscriptionNotifier(BaseHandler[STTOut, Union[STTOut, LLMIn]]):
         text_output_queue: Queue[TextEventItem] | None = None,
         runtime_config: RuntimeConfig | None = None,
         should_listen: Event | None = None,
+        wake_word_enabled: bool = False,
+        wake_words: str = "hey alice",
+        wake_word_strip: bool = True,
     ) -> None:
         self.text_output_queue = text_output_queue
         self.runtime_config = runtime_config
         self.should_listen = should_listen
+        self.wake_word_enabled = wake_word_enabled
+        self.wake_words = wake_words
+        self.wake_word_strip = wake_word_strip
 
     def process(self, transcription: STTOut) -> Iterator[Union[STTOut, LLMIn]]:
         if isinstance(transcription, PartialTranscription):
@@ -93,7 +100,26 @@ class TranscriptionNotifier(BaseHandler[STTOut, Union[STTOut, LLMIn]]):
             logger.info("Transcription completed: %s", transcript)
 
         if self.runtime_config is not None:
-            self.runtime_config.chat.add_item(make_user_message(transcript))
+            gate = apply_wake_word_gate(
+                transcript,
+                self.wake_words,
+                enabled=self.wake_word_enabled,
+                strip_wake_word=self.wake_word_strip,
+            )
+            if not gate.activated:
+                logger.info("Wake word not detected; ignoring transcript")
+                if self.should_listen is not None:
+                    self.should_listen.set()
+                return
+            if not gate.transcript:
+                logger.info("Wake word detected without command text")
+                if self.should_listen is not None:
+                    self.should_listen.set()
+                return
+            self.runtime_config.last_user_transcript = gate.transcript
+            if self.runtime_config.memory_store is not None:
+                self.runtime_config.memory_store.remember_from_transcript(gate.transcript)
+            self.runtime_config.chat.add_item(make_user_message(gate.transcript))
             yield GenerateResponseRequest(
                 runtime_config=self.runtime_config,
                 language_code=language_code,

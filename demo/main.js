@@ -439,7 +439,15 @@ if (userName && !isPlausibleName(userName)) {
 }
 /** @type {"idle" | "assistant-asking" | "awaiting-name" | "complete"} */
 let onboardingPhase = userName ? "complete" : "idle";
-let localConfig = { llmProvider: "local", llmModel: "Local model", sttModel: "Parakeet TDT", ttsModel: "Local voice" };
+let localConfig = {
+  llmProvider: "local",
+  llmModel: "Local model",
+  sttModel: "Parakeet TDT",
+  ttsModel: "Local voice",
+  wakeWord: false,
+  customTools: false,
+  memory: false,
+};
 
 // ── Connection target ────────────────────────────────────────────────────────
 // Three modes, decided by the deploy via /api/config:
@@ -544,6 +552,11 @@ function applyLocalBranding() {
   profileProvider.textContent = localConfig.llmProvider;
   $("#settings-model").textContent = localConfig.llmModel;
   $("#settings-provider").textContent = localConfig.llmProvider;
+  const features = [];
+  if (localConfig.wakeWord) features.push("Wake word");
+  if (localConfig.customTools) features.push("Custom tools");
+  if (localConfig.memory) features.push("Memory");
+  $("#settings-features").textContent = features.length ? features.join(" · ") : "None";
   const footer = $("#personal-footer");
   footer.textContent = userName
     ? `Private to ${userName} · on-device · offline-ready`
@@ -1170,6 +1183,9 @@ async function fetchConfig() {
         llmModel: json.llmModel || "Local model",
         sttModel: json.sttModel || "Parakeet TDT",
         ttsModel: json.ttsModel || "Local voice",
+        wakeWord: !!json.wakeWord,
+        customTools: !!json.customTools,
+        memory: !!json.memory,
       };
       // The conversation-time limiter rides on the LB being present.
       limiterOn = lbMode;

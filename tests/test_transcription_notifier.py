@@ -12,9 +12,15 @@ def _notifier(
     text_output_queue: Queue | None = None,
     runtime_config: RuntimeConfig | None = None,
     should_listen: Event | None = None,
+    **kwargs,
 ) -> TranscriptionNotifier:
     notifier = object.__new__(TranscriptionNotifier)
-    notifier.setup(text_output_queue=text_output_queue, runtime_config=runtime_config, should_listen=should_listen)
+    notifier.setup(
+        text_output_queue=text_output_queue,
+        runtime_config=runtime_config,
+        should_listen=should_listen,
+        **kwargs,
+    )
     return notifier
 
 
@@ -78,3 +84,30 @@ def test_empty_final_transcription_reenables_listening_without_runtime_config():
     assert list(notifier.process(Transcription(text="", language_code="en"))) == []
 
     assert should_listen.is_set()
+
+
+def test_wake_word_gate_ignores_legacy_transcript_without_trigger():
+    runtime_config = RuntimeConfig()
+    should_listen = Event()
+    notifier = _notifier(
+        runtime_config=runtime_config,
+        should_listen=should_listen,
+        wake_word_enabled=True,
+        wake_words="hey alice",
+    )
+
+    assert list(notifier.process(Transcription(text="what time is it", language_code="en"))) == []
+
+    assert runtime_config.chat.buffer == []
+    assert should_listen.is_set()
+
+
+def test_wake_word_gate_strips_legacy_trigger_before_generation():
+    runtime_config = RuntimeConfig()
+    notifier = _notifier(runtime_config=runtime_config, wake_word_enabled=True, wake_words="hey alice")
+
+    result = list(notifier.process(Transcription(text="Hey Alice, what time is it?", language_code="en")))
+
+    assert len(result) == 1
+    assert isinstance(result[0], GenerateResponseRequest)
+    assert runtime_config.chat.buffer[0].content[0].text == "what time is it?"

@@ -28,6 +28,7 @@ from speech_to_speech.LLM.chat import (
     make_user_message,
 )
 from speech_to_speech.LLM.compaction_prompt import CompactGenerateFn, build_compactor
+from speech_to_speech.LLM.memory_prompt import apply_memory_context
 from speech_to_speech.LLM.text_prompt import build_text_system_prompt
 from speech_to_speech.LLM.utils import remove_unspeechable, resolve_auto_language
 from speech_to_speech.LLM.voice_prompt import build_voice_system_prompt
@@ -137,7 +138,7 @@ class BaseOpenAICompatibleHandler(BaseHandler[LLMIn, LLMOut], ABC):
         disable_thinking: bool = True,
         reasoning_effort: Optional[str] = None,
         request_timeout_s: float = 20.0,
-        stream_batch_sentences: int = 3,
+        stream_batch_sentences: int = 1,
         enable_lang_prompt: bool = False,
         compact_history: bool = False,
         **_kwargs: Any,
@@ -556,6 +557,7 @@ class BaseOpenAICompatibleHandler(BaseHandler[LLMIn, LLMOut], ABC):
             response.tool_choice if response and response.tool_choice else runtime_config.session.tool_choice
         )
         wants_audio = response_wants_audio(response)
+        apply_memory_context(active_chat, runtime_config)
         self._apply_config(active_chat, instructions, wants_audio)
         language_code, lang_name = resolve_auto_language(language_code)
         if lang_name and self.enable_lang_prompt:
