@@ -107,6 +107,7 @@ function _codedError(message, code, extra) {
 // as soon as a sub-field shape it doesn't know about appears.
 const OUTPUT_SAMPLE_RATE = 16000;
 const MIC_CHUNK_MS = 40;
+const PLAYBACK_END_HANG_MS = 300;
 
 export class S2sWsRealtimeClient extends EventTarget {
   /** @param {WsClientOptions} options */
@@ -168,6 +169,8 @@ export class S2sWsRealtimeClient extends EventTarget {
     /** @type {WsStatus} */
     this._status = "idle";
     this._aiSpeaking = false;
+    this._pendingAudioResponseId = "";
+    this._playbackEndTimer = 0;
     /** @type {Set<string>} response_ids that have actually played audio, so the
      * UI can tell a barge-in cut (keep it) from a never-heard speculative
      * response (drop it). */
@@ -226,6 +229,37 @@ export class S2sWsRealtimeClient extends EventTarget {
     if (this._status === "ai-speaking") return;
     if (this._status === "closed" || this._status === "error") return;
     this._setStatus("ai-speaking");
+  }
+
+  _beginAiPlayback() {
+    if (this._playbackEndTimer) {
+      clearTimeout(this._playbackEndTimer);
+      this._playbackEndTimer = 0;
+    }
+    if (this._pendingAudioResponseId) {
+      this._audibleResponses.add(this._pendingAudioResponseId);
+    }
+    if (!this._aiSpeaking) {
+      this._aiSpeaking = true;
+      this._markAudible();
+    }
+  }
+
+  _scheduleAiPlaybackEnd() {
+    if (this._playbackEndTimer) clearTimeout(this._playbackEndTimer);
+    this._playbackEndTimer = window.setTimeout(() => {
+      this._playbackEndTimer = 0;
+      this._endAiPlayback();
+    }, PLAYBACK_END_HANG_MS);
+  }
+
+  _endAiPlayback() {
+    if (!this._aiSpeaking) return;
+    this._aiSpeaking = false;
+    this._pendingAudioResponseId = "";
+    if (this._status === "ai-speaking") {
+      this._setStatus(this._openResponses > 0 ? "processing" : "connected");
+    }
   }
 
   /**
@@ -562,11 +596,13 @@ export class S2sWsRealtimeClient extends EventTarget {
    * @param {{ kind: string; queuedMs?: number; played?: number }} data
    */
   _onPlaybackMessage(data) {
-    if (data?.kind === "underrun") {
+    if (data?.kind === "playback-started") {
+      this._beginAiPlayback();
+    } else if (data?.kind === "playback-ended" || data?.kind === "underrun") {
       // Server stopped sending audio mid-response. Most likely the turn
-      // ended cleanly (a response.done usually arrives just before/after
-      // this). We let the state machine fall back to "connected" via the
-      // response.done event handler.
+      // ended cleanly. Hold briefly so tiny packet gaps don't flicker the
+      // speaking avatar.
+      this._scheduleAiPlaybackEnd();
     }
   }
 
@@ -639,7 +675,12 @@ export class S2sWsRealtimeClient extends EventTarget {
         // even though we already flipped `_aiSpeaking` off, and that tail would
         // otherwise keep playing over the user's barge-in.
         this._playbackNode?.port.postMessage({ kind: "clear" });
+        if (this._playbackEndTimer) {
+          clearTimeout(this._playbackEndTimer);
+          this._playbackEndTimer = 0;
+        }
         this._aiSpeaking = false;
+        this._pendingAudioResponseId = "";
         this._setStatus("user-speaking");
         break;
 
@@ -667,10 +708,9 @@ export class S2sWsRealtimeClient extends EventTarget {
       case "response.output_audio.delta": {
         this._pushAudioDelta(event.delta);
         const rid = event.response_id ?? event.response?.id;
-        if (rid) this._audibleResponses.add(rid);
-        if (!this._aiSpeaking) {
-          this._aiSpeaking = true;
-          this._markAudible();
+        if (rid) this._pendingAudioResponseId = rid;
+        if (!this._aiSpeaking && (this._status === "connected" || this._status === "user-speaking")) {
+          this._setStatus("processing");
         }
         break;
       }
@@ -678,17 +718,18 @@ export class S2sWsRealtimeClient extends EventTarget {
       case "response.content_part.added": {
         const part = event.part;
         if (part?.type === "audio" || part?.type === "output_audio") {
-          this._markAudible();
+          if (this._status === "connected" || this._status === "user-speaking") {
+            this._setStatus("processing");
+          }
         }
         break;
       }
 
       case "response.done": {
-        this._aiSpeaking = false;
         // This response freed the slot (completion OR cancellation both arrive
         // as response.done). Decrement and, if a create was waiting, replay it.
         this._openResponses = Math.max(0, this._openResponses - 1);
-        if (this._status === "ai-speaking" || this._status === "processing") {
+        if (this._status === "processing" || (this._status === "ai-speaking" && !this._aiSpeaking)) {
           this._setStatus("connected");
         }
         // A response closes here for BOTH normal completion and cancellation
@@ -1067,6 +1108,10 @@ export class S2sWsRealtimeClient extends EventTarget {
     }
     this._visualiser?.stop();
     this._visualiser = null;
+    if (this._playbackEndTimer) {
+      clearTimeout(this._playbackEndTimer);
+      this._playbackEndTimer = 0;
+    }
     try {
       if (this._ws && this._ws.readyState <= WebSocket.OPEN) {
         this._ws.close(1000, "client closed");

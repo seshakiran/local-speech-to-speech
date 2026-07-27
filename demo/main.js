@@ -633,14 +633,21 @@ let client = null;
 /** @type {MediaStream | null} */
 let micStream = null;
 let micMuted = false;
+/** @type {"standby" | "thinking" | "speaking"} */
+let activeAvatarVideo = "standby";
 
 /** @param {AppState} next */
 function syncAvatarVideo(next) {
   const activeKind = AVATAR_VIDEO_BY_STATE[next] || "standby";
+  const changed = activeAvatarVideo !== activeKind;
+  activeAvatarVideo = activeKind;
   for (const video of avatarVideos) {
     const active = video.dataset.avatarVideo === activeKind;
     video.classList.toggle("active", active);
     if (active) {
+      if (changed) {
+        try { video.currentTime = 0; } catch { /* ignored */ }
+      }
       void video.play().catch(() => {});
     } else {
       video.pause();
