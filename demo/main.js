@@ -338,6 +338,10 @@ const AVATAR_VIDEO_BY_STATE = {
   error: "standby",
 };
 
+const AVATAR_SPEECH_OPEN_LEVEL = 0.035;
+const AVATAR_SPEECH_CLOSE_LEVEL = 0.012;
+const AVATAR_SPEECH_CLOSE_MS = 140;
+
 /** @type {ReadonlySet<AppState>} */
 const LIVE_STATES = new Set(["listening", "user-speaking", "processing", "ai-speaking"]);
 
@@ -635,23 +639,80 @@ let micStream = null;
 let micMuted = false;
 /** @type {"standby" | "thinking" | "speaking"} */
 let activeAvatarVideo = "standby";
+let avatarSpeechRaf = 0;
+let avatarLastVoicedAt = 0;
 
-/** @param {AppState} next */
-function syncAvatarVideo(next) {
-  const activeKind = AVATAR_VIDEO_BY_STATE[next] || "standby";
+/** @returns {number} */
+function currentAiAudioLevel() {
+  const raw = getComputedStyle(document.documentElement).getPropertyValue("--ai-audio-level");
+  const value = Number.parseFloat(raw);
+  return Number.isFinite(value) ? value : 0;
+}
+
+/**
+ * @param {"standby" | "thinking" | "speaking"} activeKind
+ * @param {{ restart?: boolean }} [opts]
+ */
+function setAvatarVideo(activeKind, opts = {}) {
   const changed = activeAvatarVideo !== activeKind;
   activeAvatarVideo = activeKind;
   for (const video of avatarVideos) {
     const active = video.dataset.avatarVideo === activeKind;
     video.classList.toggle("active", active);
     if (active) {
-      if (changed) {
+      if (changed && opts.restart !== false) {
         try { video.currentTime = 0; } catch { /* ignored */ }
       }
       void video.play().catch(() => {});
     } else {
       video.pause();
     }
+  }
+}
+
+function stopAvatarSpeechSync() {
+  if (avatarSpeechRaf) cancelAnimationFrame(avatarSpeechRaf);
+  avatarSpeechRaf = 0;
+  for (const video of avatarVideos) video.playbackRate = 1;
+}
+
+function tickAvatarSpeechSync() {
+  if (currentState !== "ai-speaking") {
+    stopAvatarSpeechSync();
+    return;
+  }
+
+  const level = currentAiAudioLevel();
+  const now = performance.now();
+  if (level >= AVATAR_SPEECH_OPEN_LEVEL) {
+    avatarLastVoicedAt = now;
+    setAvatarVideo("speaking", { restart: false });
+  } else if (level <= AVATAR_SPEECH_CLOSE_LEVEL && now - avatarLastVoicedAt > AVATAR_SPEECH_CLOSE_MS) {
+    setAvatarVideo("standby", { restart: false });
+  }
+
+  const speakingVideo = avatarVideos.find((video) => video.dataset.avatarVideo === "speaking");
+  if (speakingVideo) {
+    speakingVideo.playbackRate = Math.min(1.55, Math.max(0.75, 0.85 + level * 1.8));
+  }
+
+  avatarSpeechRaf = requestAnimationFrame(tickAvatarSpeechSync);
+}
+
+function startAvatarSpeechSync() {
+  avatarLastVoicedAt = performance.now();
+  if (!avatarSpeechRaf) avatarSpeechRaf = requestAnimationFrame(tickAvatarSpeechSync);
+}
+
+/** @param {AppState} next */
+function syncAvatarVideo(next) {
+  const activeKind = AVATAR_VIDEO_BY_STATE[next] || "standby";
+  if (next === "ai-speaking") {
+    setAvatarVideo("speaking");
+    startAvatarSpeechSync();
+  } else {
+    stopAvatarSpeechSync();
+    setAvatarVideo(activeKind);
   }
 }
 
