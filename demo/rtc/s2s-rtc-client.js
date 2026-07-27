@@ -549,7 +549,6 @@ export class S2sRtcRealtimeClient extends EventTarget {
 
       case "response.audio_transcript.delta":
       case "response.output_audio_transcript.delta": {
-        this._markAudible();
         const rid = typeof event.response_id === "string" ? event.response_id : "";
         const delta = typeof event.delta === "string" ? event.delta : "";
         if (delta) {

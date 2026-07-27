@@ -823,7 +823,6 @@ export class S2sWsRealtimeClient extends EventTarget {
         // deltas and push the running text to the UI. Every transcribe event we
         // receive reaches the conversation, so an interrupted reply already has
         // its partial text even if the `.done` never fires.
-        this._markAudible();
         const rid = typeof event.response_id === "string" ? event.response_id : "";
         const delta = typeof event.delta === "string" ? event.delta : "";
         if (delta) {

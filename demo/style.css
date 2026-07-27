@@ -775,6 +775,132 @@ a:hover {
   opacity: 1;
 }
 
+.avatar-lipsync {
+  --mouth-open: 0;
+  --mouth-wide: 1;
+  --mouth-round: 0;
+  --mouth-teeth: 0;
+  --mouth-tongue: 0;
+  position: absolute;
+  left: 50%;
+  top: 64.5%;
+  width: 16%;
+  height: 7.2%;
+  border-radius: 999px;
+  background: rgba(48, 18, 22, calc(0.64 + var(--mouth-open) * 0.24));
+  box-shadow:
+    0 0 0 1px rgba(116, 50, 52, 0.52),
+    inset 0 1px 2px rgba(255, 198, 188, 0.16),
+    inset 0 -4px 9px rgba(10, 0, 3, 0.34);
+  opacity: 0;
+  transform:
+    translate(-50%, -50%)
+    scaleX(calc(0.48 + var(--mouth-wide) * 0.52 - var(--mouth-round) * 0.22))
+    scaleY(calc(0.2 + var(--mouth-open) * 1.18));
+  transform-origin: 50% 50%;
+  transition:
+    opacity 0.08s ease,
+    transform 0.06s linear,
+    border-radius 0.06s linear,
+    background 0.06s linear;
+  pointer-events: none;
+  z-index: 4;
+}
+
+.avatar-stage.state-ai-speaking .avatar-lipsync {
+  opacity: 1;
+}
+
+.avatar-lipsync.viseme-rest,
+.avatar-lipsync.viseme-mbp {
+  --mouth-open: 0.02;
+  --mouth-wide: 0.78;
+}
+
+.avatar-lipsync.viseme-aa {
+  --mouth-open: 1;
+  --mouth-wide: 0.82;
+}
+
+.avatar-lipsync.viseme-ee {
+  --mouth-open: 0.28;
+  --mouth-wide: 1.35;
+}
+
+.avatar-lipsync.viseme-oh {
+  --mouth-open: 0.78;
+  --mouth-wide: 0.64;
+  --mouth-round: 1;
+  border-radius: 50%;
+}
+
+.avatar-lipsync.viseme-fv,
+.avatar-lipsync.viseme-th {
+  --mouth-open: 0.2;
+  --mouth-wide: 1.12;
+  --mouth-teeth: 1;
+}
+
+.avatar-lipsync.viseme-l {
+  --mouth-open: 0.48;
+  --mouth-wide: 0.94;
+  --mouth-tongue: 1;
+}
+
+.viseme-lip,
+.viseme-jaw,
+.viseme-teeth,
+.viseme-tongue {
+  position: absolute;
+  left: 50%;
+  pointer-events: none;
+}
+
+.viseme-lip {
+  width: 100%;
+  height: 38%;
+  border-radius: 999px;
+  background: rgba(164, 69, 72, 0.62);
+  transform: translateX(-50%);
+}
+
+.viseme-lip.upper {
+  top: -15%;
+  box-shadow: inset 0 -2px 4px rgba(74, 22, 26, 0.38);
+}
+
+.viseme-lip.lower {
+  bottom: -15%;
+  box-shadow: inset 0 2px 4px rgba(255, 181, 171, 0.18);
+}
+
+.viseme-jaw {
+  top: 50%;
+  width: 72%;
+  height: calc(8% + var(--mouth-open) * 46%);
+  border-radius: 50%;
+  background: rgba(15, 1, 5, 0.42);
+  transform: translate(-50%, -50%);
+}
+
+.viseme-teeth {
+  top: 29%;
+  width: 84%;
+  height: 18%;
+  border-radius: 999px;
+  background: rgba(255, 238, 220, calc(var(--mouth-teeth) * 0.85));
+  transform: translateX(-50%);
+}
+
+.viseme-tongue {
+  bottom: 8%;
+  width: 50%;
+  height: 20%;
+  border-radius: 50%;
+  background: rgba(232, 105, 117, calc(var(--mouth-tongue) * 0.7));
+  transform: translateX(-50%);
+}
+
 /* ─── Central circle ──────────────────────────────────────────────────── */
 
 /* Wraps the orb and its two side controls so they stay aligned on one row. */

@@ -334,13 +334,26 @@ const AVATAR_VIDEO_BY_STATE = {
   listening: "standby",
   "user-speaking": "standby",
   processing: "thinking",
-  "ai-speaking": "speaking",
+  "ai-speaking": "standby",
   error: "standby",
 };
 
 const AVATAR_SPEECH_OPEN_LEVEL = 0.035;
 const AVATAR_SPEECH_CLOSE_LEVEL = 0.012;
 const AVATAR_SPEECH_CLOSE_MS = 140;
+const AVATAR_BASE_CPS = 8.5;
+const AVATAR_AUDIO_CPS = 24;
+
+const VISEME_SHAPES = {
+  rest: { open: 0.02, wide: 0.78, round: 0, teeth: 0, tongue: 0 },
+  mbp: { open: 0.01, wide: 0.72, round: 0, teeth: 0, tongue: 0 },
+  aa: { open: 1.0, wide: 0.84, round: 0, teeth: 0, tongue: 0 },
+  ee: { open: 0.32, wide: 1.35, round: 0, teeth: 0, tongue: 0 },
+  oh: { open: 0.82, wide: 0.64, round: 1, teeth: 0, tongue: 0 },
+  fv: { open: 0.2, wide: 1.12, round: 0, teeth: 1, tongue: 0 },
+  th: { open: 0.32, wide: 1.05, round: 0, teeth: 1, tongue: 0.32 },
+  l: { open: 0.48, wide: 0.94, round: 0, teeth: 0, tongue: 1 },
+};
 
 /** @type {ReadonlySet<AppState>} */
 const LIVE_STATES = new Set(["listening", "user-speaking", "processing", "ai-speaking"]);
@@ -357,6 +370,8 @@ const orbWrap = $(".orb-wrap");
 const avatarStage = $("#avatar-stage");
 /** @type {HTMLVideoElement[]} */
 const avatarVideos = Array.from(document.querySelectorAll("[data-avatar-video]"));
+/** @type {HTMLElement} */
+const avatarLipSync = $("#avatar-lipsync");
 /** @type {HTMLButtonElement} */
 const micBtn = $("#mic-btn");
 /** @type {HTMLButtonElement} */
@@ -641,6 +656,73 @@ let micMuted = false;
 let activeAvatarVideo = "standby";
 let avatarSpeechRaf = 0;
 let avatarLastVoicedAt = 0;
+let avatarSpeechText = "";
+let avatarSpeechResponseId = "";
+let avatarSpeechIndex = 0;
+let avatarSpeechCarry = 0;
+let avatarSpeechLastTick = 0;
+
+/** @param {keyof typeof VISEME_SHAPES} name @param {number} level */
+function setAvatarViseme(name, level = 0) {
+  const shape = VISEME_SHAPES[name] || VISEME_SHAPES.rest;
+  const energy = Math.min(1, Math.max(0, level / 0.22));
+  const open = name === "rest" || name === "mbp"
+    ? shape.open
+    : shape.open * (0.38 + energy * 0.82);
+  avatarLipSync.className = `avatar-lipsync viseme-${name}`;
+  avatarLipSync.style.setProperty("--mouth-open", open.toFixed(3));
+  avatarLipSync.style.setProperty("--mouth-wide", shape.wide.toFixed(3));
+  avatarLipSync.style.setProperty("--mouth-round", shape.round.toFixed(3));
+  avatarLipSync.style.setProperty("--mouth-teeth", shape.teeth.toFixed(3));
+  avatarLipSync.style.setProperty("--mouth-tongue", shape.tongue.toFixed(3));
+}
+
+/** @param {string} text @param {number} start */
+function nextSpeechIndex(text, start) {
+  let i = Math.max(0, Math.min(start, text.length));
+  while (i < text.length && /[\s.,!?;:()[\]{}"“”'’]/.test(text[i])) i++;
+  return i;
+}
+
+/** @param {string} text @param {number} index @returns {keyof typeof VISEME_SHAPES} */
+function visemeForTextAt(text, index) {
+  const i = nextSpeechIndex(text, index);
+  if (i >= text.length) return "rest";
+  const pair = text.slice(i, i + 2).toLowerCase();
+  if (pair === "th") return "th";
+  const ch = text[i].toLowerCase();
+  if ("mbp".includes(ch)) return "mbp";
+  if ("fv".includes(ch)) return "fv";
+  if (ch === "l") return "l";
+  if ("a".includes(ch)) return "aa";
+  if ("eiyszcxj".includes(ch)) return "ee";
+  if ("ouwqr".includes(ch)) return "oh";
+  if ("tdnkg".includes(ch)) return "l";
+  return "aa";
+}
+
+/** @param {{ role: "user" | "assistant"; text: string; partial: boolean; responseId?: string }} d */
+function updateAvatarTranscript(d) {
+  if (d.role !== "assistant") return;
+  if (d.responseId && d.responseId !== avatarSpeechResponseId) {
+    avatarSpeechResponseId = d.responseId;
+    avatarSpeechText = "";
+    avatarSpeechIndex = 0;
+    avatarSpeechCarry = 0;
+  }
+  if (d.text && d.text.length >= avatarSpeechText.length) {
+    avatarSpeechText = d.text;
+  }
+}
+
+function resetAvatarSpeech() {
+  avatarSpeechText = "";
+  avatarSpeechResponseId = "";
+  avatarSpeechIndex = 0;
+  avatarSpeechCarry = 0;
+  avatarSpeechLastTick = 0;
+  setAvatarViseme("rest", 0);
+}
 
 /** @returns {number} */
 function currentAiAudioLevel() {
@@ -674,6 +756,7 @@ function stopAvatarSpeechSync() {
   if (avatarSpeechRaf) cancelAnimationFrame(avatarSpeechRaf);
   avatarSpeechRaf = 0;
   for (const video of avatarVideos) video.playbackRate = 1;
+  resetAvatarSpeech();
 }
 
 function tickAvatarSpeechSync() {
@@ -684,11 +767,20 @@ function tickAvatarSpeechSync() {
 
   const level = currentAiAudioLevel();
   const now = performance.now();
+  const dt = avatarSpeechLastTick ? Math.min(80, now - avatarSpeechLastTick) : 16;
+  avatarSpeechLastTick = now;
+
   if (level >= AVATAR_SPEECH_OPEN_LEVEL) {
     avatarLastVoicedAt = now;
-    setAvatarVideo("speaking", { restart: false });
+    const cps = AVATAR_BASE_CPS + Math.min(1, level / 0.25) * AVATAR_AUDIO_CPS;
+    avatarSpeechCarry += (dt / 1000) * cps;
+    while (avatarSpeechCarry >= 1 && avatarSpeechIndex < avatarSpeechText.length) {
+      avatarSpeechIndex = nextSpeechIndex(avatarSpeechText, avatarSpeechIndex + 1);
+      avatarSpeechCarry -= 1;
+    }
+    setAvatarViseme(visemeForTextAt(avatarSpeechText, avatarSpeechIndex), level);
   } else if (level <= AVATAR_SPEECH_CLOSE_LEVEL && now - avatarLastVoicedAt > AVATAR_SPEECH_CLOSE_MS) {
-    setAvatarVideo("standby", { restart: false });
+    setAvatarViseme("rest", level);
   }
 
   const speakingVideo = avatarVideos.find((video) => video.dataset.avatarVideo === "speaking");
@@ -701,6 +793,7 @@ function tickAvatarSpeechSync() {
 
 function startAvatarSpeechSync() {
   avatarLastVoicedAt = performance.now();
+  avatarSpeechLastTick = 0;
   if (!avatarSpeechRaf) avatarSpeechRaf = requestAnimationFrame(tickAvatarSpeechSync);
 }
 
@@ -708,7 +801,7 @@ function startAvatarSpeechSync() {
 function syncAvatarVideo(next) {
   const activeKind = AVATAR_VIDEO_BY_STATE[next] || "standby";
   if (next === "ai-speaking") {
-    setAvatarVideo("speaking");
+    setAvatarVideo("standby", { restart: false });
     startAvatarSpeechSync();
   } else {
     stopAvatarSpeechSync();
@@ -1747,6 +1840,7 @@ async function doStart(audioContext = null) {
   c.addEventListener("transcript", (e) => {
     const d = /** @type {CustomEvent<{ role: "user" | "assistant"; text: string; partial: boolean; itemId?: string; responseId?: string }>} */ (e).detail;
     chat.onTranscript(d);
+    updateAvatarTranscript(d);
     if (d.role === "user" && !d.partial && onboardingPhase === "awaiting-name") {
       const spokenName = nameFromTranscript(d.text);
       if (spokenName) {
@@ -1760,6 +1854,14 @@ async function doStart(audioContext = null) {
   c.addEventListener("response-finished", (e) => {
     const detail = /** @type {CustomEvent<{ responseId: string; status: string; audible?: boolean; transcript?: string }>} */ (e).detail;
     chat.onResponseFinished(detail);
+    if (detail.transcript) {
+      updateAvatarTranscript({
+        role: "assistant",
+        text: detail.transcript,
+        partial: false,
+        responseId: detail.responseId,
+      });
+    }
     if (onboardingPhase === "assistant-asking") {
       onboardingPhase = "awaiting-name";
       setCaption("Say your name");
