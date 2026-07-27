@@ -336,6 +336,8 @@ const circleCaption = $("#circle-caption");
 const circleSubcaption = $("#circle-subcaption");
 /** @type {HTMLElement} */
 const orbWrap = $(".orb-wrap");
+/** @type {HTMLElement} */
+const avatarStage = $("#avatar-stage");
 /** @type {HTMLButtonElement} */
 const micBtn = $("#mic-btn");
 /** @type {HTMLButtonElement} */
@@ -623,6 +625,7 @@ function setState(next) {
   const view = STATE_VIEWS[next];
   circleBtn.disabled = view.disabled;
   circleBtn.className = `circle ${STATE_CLASS[next]}`;
+  avatarStage.className = `avatar-stage ${STATE_CLASS[next]}`;
   if (next !== "error") {
     const caption = next === "idle"
       ? (userName ? `Tap to talk, ${userName}` : "Tap to introduce yourself")
@@ -632,6 +635,7 @@ function setState(next) {
 
   const live = LIVE_STATES.has(next);
   orbWrap.classList.toggle("live", live);
+  avatarStage.classList.toggle("live", live);
   micBtn.setAttribute("aria-hidden", live ? "false" : "true");
   stopBtn.setAttribute("aria-hidden", live ? "false" : "true");
   micBtn.tabIndex = live ? 0 : -1;

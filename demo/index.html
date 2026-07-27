@@ -70,6 +70,29 @@
       </header>
 
       <main class="stage">
+        <section id="avatar-stage" class="avatar-stage state-idle" aria-label="Assistant avatar">
+          <div class="avatar-presence" aria-hidden="true">
+            <span class="avatar-halo"></span>
+            <span class="avatar-signal signal-left"></span>
+            <span class="avatar-signal signal-right"></span>
+            <div class="avatar-head">
+              <div class="avatar-face">
+                <span class="avatar-brow brow-left"></span>
+                <span class="avatar-brow brow-right"></span>
+                <span class="avatar-eye eye-left"></span>
+                <span class="avatar-eye eye-right"></span>
+                <span class="avatar-cheek cheek-left"></span>
+                <span class="avatar-cheek cheek-right"></span>
+                <span class="avatar-mouth">
+                  <span class="avatar-mouth-inner"></span>
+                </span>
+              </div>
+            </div>
+            <div class="avatar-neck"></div>
+            <div class="avatar-shoulders"></div>
+          </div>
+        </section>
+
         <div class="orb-wrap">
           <div id="mic-gate" class="mic-gate">
             <svg id="mic-gate-arc" class="mic-gate-arc" viewBox="0 0 100 100" aria-hidden="true">
@@ -209,7 +232,7 @@
               <span class="pipe-job">speaks it back</span>
               <a class="pipe-model" href="https://huggingface.co/Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice" target="_blank" rel="noopener">Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice<svg class="ext" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 17 17 7"/><path d="M8 7h9v9"/></svg></a>
             </li>
-            <li class="pipe-endpoint">The orb replies</li>
+            <li class="pipe-endpoint">The avatar replies</li>
           </ol>
         </div>
       </div>
