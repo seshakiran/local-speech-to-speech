@@ -71,25 +71,35 @@
 
       <main class="stage">
         <section id="avatar-stage" class="avatar-stage state-idle" aria-label="Assistant avatar">
-          <div class="avatar-presence" aria-hidden="true">
-            <span class="avatar-halo"></span>
-            <span class="avatar-signal signal-left"></span>
-            <span class="avatar-signal signal-right"></span>
-            <div class="avatar-head">
-              <div class="avatar-face">
-                <span class="avatar-brow brow-left"></span>
-                <span class="avatar-brow brow-right"></span>
-                <span class="avatar-eye eye-left"></span>
-                <span class="avatar-eye eye-right"></span>
-                <span class="avatar-cheek cheek-left"></span>
-                <span class="avatar-cheek cheek-right"></span>
-                <span class="avatar-mouth">
-                  <span class="avatar-mouth-inner"></span>
-                </span>
-              </div>
-            </div>
-            <div class="avatar-neck"></div>
-            <div class="avatar-shoulders"></div>
+          <div class="avatar-ring" aria-hidden="true">
+            <video
+              class="avatar-video active"
+              data-avatar-video="standby"
+              src="assets/avatars/alice/standby.mp4"
+              loop
+              muted
+              autoplay
+              playsinline
+              preload="auto"
+            ></video>
+            <video
+              class="avatar-video"
+              data-avatar-video="thinking"
+              src="assets/avatars/alice/thinking.mp4"
+              loop
+              muted
+              playsinline
+              preload="auto"
+            ></video>
+            <video
+              class="avatar-video"
+              data-avatar-video="speaking"
+              src="assets/avatars/alice/speaking.mp4"
+              loop
+              muted
+              playsinline
+              preload="auto"
+            ></video>
           </div>
         </section>
 

@@ -700,225 +700,30 @@ a:hover {
 
 .avatar-stage {
   --avatar-state: var(--text-faint);
-  width: min(360px, 72vw);
-  height: clamp(178px, 28vh, 260px);
+  width: clamp(230px, min(52vw, 45vh), 430px);
+  aspect-ratio: 1 / 1;
   display: grid;
-  place-items: end center;
+  place-items: center;
   position: relative;
   flex: none;
   transition: filter 0.25s ease, transform 0.25s ease;
 }
 
-.avatar-presence {
+.avatar-ring {
   position: relative;
-  width: min(270px, 64vw);
+  width: 100%;
   height: 100%;
+  overflow: hidden;
+  border-radius: 50%;
+  background: #050505;
+  border: 2px solid color-mix(in srgb, var(--avatar-state) 72%, rgba(255, 255, 255, 0.18));
+  box-shadow:
+    0 0 0 2px rgba(255, 255, 255, 0.05),
+    0 0 46px color-mix(in srgb, var(--avatar-state) 22%, transparent),
+    0 26px 70px rgba(0, 0, 0, 0.42);
   display: grid;
-  place-items: end center;
-  isolation: isolate;
-  transform-origin: 50% 100%;
-  animation: avatar-breathe 4.8s ease-in-out infinite;
-}
-
-.avatar-halo {
-  position: absolute;
-  bottom: 20px;
-  width: 78%;
-  aspect-ratio: 1 / 1;
-  border-radius: 50%;
-  border: 1px solid color-mix(in srgb, var(--avatar-state) 32%, transparent);
-  background:
-    radial-gradient(circle at 50% 30%, color-mix(in srgb, var(--avatar-state) 14%, transparent), transparent 48%),
-    radial-gradient(circle at 50% 70%, rgba(255, 255, 255, 0.08), transparent 62%);
-  box-shadow:
-    0 0 38px color-mix(in srgb, var(--avatar-state) 20%, transparent),
-    inset 0 0 30px rgba(255, 255, 255, 0.04);
-  opacity: 0.75;
-  z-index: 0;
-  transition: border-color 0.25s ease, box-shadow 0.25s ease, opacity 0.25s ease;
-}
-
-.avatar-signal {
-  position: absolute;
-  top: 46%;
-  width: 36px;
-  height: 2px;
-  border-radius: 999px;
-  background: color-mix(in srgb, var(--avatar-state) 48%, transparent);
-  opacity: 0;
-  transform-origin: center;
-  z-index: 1;
-}
-
-.signal-left {
-  left: 8px;
-  transform: rotate(-18deg);
-}
-
-.signal-right {
-  right: 8px;
-  transform: rotate(18deg);
-}
-
-.avatar-head {
-  position: absolute;
-  bottom: 46px;
-  width: clamp(132px, 32vw, 172px);
-  aspect-ratio: 0.9 / 1;
-  border-radius: 42% 42% 44% 44% / 38% 38% 50% 50%;
-  background:
-    radial-gradient(circle at 36% 26%, rgba(255, 255, 255, 0.26), transparent 22%),
-    linear-gradient(145deg, #f1dac6 0%, #c9a896 58%, #715b68 100%);
-  border: 1px solid rgba(255, 255, 255, 0.26);
-  box-shadow:
-    0 24px 55px rgba(0, 0, 0, 0.35),
-    inset -18px -22px 42px rgba(51, 31, 45, 0.34),
-    inset 12px 14px 28px rgba(255, 255, 255, 0.13);
-  overflow: hidden;
-  z-index: 3;
-  transition: transform 0.28s ease, box-shadow 0.28s ease;
-}
-
-.avatar-head::before {
-  content: "";
-  position: absolute;
-  inset: 5% 7% auto;
-  height: 30%;
-  border-radius: 999px 999px 32px 32px;
-  background: linear-gradient(135deg, #252c38, #11151f 72%);
-  box-shadow: 0 8px 18px rgba(0, 0, 0, 0.26);
-}
-
-.avatar-head::after {
-  content: "";
-  position: absolute;
-  left: 50%;
-  top: 51%;
-  width: 16px;
-  height: 13px;
-  border-radius: 50%;
-  background: rgba(62, 43, 52, 0.2);
-  transform: translateX(-50%);
-  filter: blur(0.2px);
-}
-
-.avatar-face {
-  position: absolute;
-  inset: 0;
-}
-
-.avatar-brow,
-.avatar-eye,
-.avatar-cheek,
-.avatar-mouth {
-  position: absolute;
-  display: block;
-}
-
-.avatar-brow {
-  top: 44%;
-  width: 28px;
-  height: 3px;
-  border-radius: 999px;
-  background: rgba(42, 32, 42, 0.58);
-  transition: transform 0.24s ease;
-}
-
-.brow-left {
-  left: 26%;
-  transform: rotate(-7deg);
-}
-
-.brow-right {
-  right: 26%;
-  transform: rotate(7deg);
-}
-
-.avatar-eye {
-  top: 50%;
-  width: 14px;
-  height: 14px;
-  border-radius: 50%;
-  background: #10212a;
-  box-shadow:
-    0 0 0 3px rgba(16, 33, 42, 0.1),
-    0 0 15px color-mix(in srgb, var(--avatar-state) 58%, transparent);
-  transition: background 0.25s ease, box-shadow 0.25s ease, transform 0.25s ease;
-}
-
-.eye-left {
-  left: 31%;
-}
-
-.eye-right {
-  right: 31%;
-}
-
-.avatar-cheek {
-  top: 61%;
-  width: 20px;
-  height: 8px;
-  border-radius: 50%;
-  background: rgba(244, 114, 182, 0.12);
-  opacity: 0.75;
-}
-
-.cheek-left {
-  left: 23%;
-}
-
-.cheek-right {
-  right: 23%;
-}
-
-.avatar-mouth {
-  left: 50%;
-  bottom: 22%;
-  width: 38px;
-  height: 10px;
-  border-radius: 0 0 999px 999px;
-  background: rgba(38, 25, 33, 0.84);
-  transform: translateX(-50%);
-  overflow: hidden;
-  transform-origin: 50% 50%;
-  transition: width 0.2s ease, height 0.2s ease, border-radius 0.2s ease, transform 0.2s ease;
-}
-
-.avatar-mouth-inner {
-  position: absolute;
-  left: 50%;
-  bottom: -8px;
-  width: 24px;
-  height: 14px;
-  border-radius: 50%;
-  background: rgba(255, 130, 145, 0.5);
-  transform: translateX(-50%);
-}
-
-.avatar-neck {
-  position: absolute;
-  bottom: 30px;
-  width: 48px;
-  height: 42px;
-  border-radius: 20px 20px 12px 12px;
-  background: linear-gradient(180deg, #ac8d82, #65505c);
-  border: 1px solid rgba(255, 255, 255, 0.13);
-  z-index: 2;
-}
-
-.avatar-shoulders {
-  position: absolute;
-  bottom: 0;
-  width: min(235px, 58vw);
-  height: 68px;
-  border-radius: 82px 82px 14px 14px / 60px 60px 14px 14px;
-  background:
-    radial-gradient(circle at 50% 0%, color-mix(in srgb, var(--avatar-state) 18%, transparent), transparent 44%),
-    linear-gradient(135deg, #2c3442, #151923 65%, #0f1118);
-  border: 1px solid rgba(255, 255, 255, 0.11);
-  box-shadow: 0 24px 44px rgba(0, 0, 0, 0.36);
-  z-index: 1;
-  transition: box-shadow 0.25s ease, border-color 0.25s ease;
+  place-items: center;
+  transition: border-color 0.25s ease, box-shadow 0.25s ease, transform 0.25s ease;
 }
 
 .avatar-stage.state-listening,
@@ -940,111 +745,34 @@ a:hover {
   --avatar-state: var(--error);
 }
 
-.avatar-stage.live .avatar-halo {
+.avatar-stage.live .avatar-ring {
+  box-shadow:
+    0 0 0 2px rgba(255, 255, 255, 0.06),
+    0 0 58px color-mix(in srgb, var(--avatar-state) 36%, transparent),
+    0 28px 76px rgba(0, 0, 0, 0.48);
+}
+
+.avatar-stage.state-user-speaking .avatar-ring {
+  transform: scale(calc(1 + var(--audio-level, 0) * 0.025));
+}
+
+.avatar-stage.state-ai-speaking .avatar-ring {
+  transform: scale(calc(1 + var(--ai-audio-level, 0) * 0.025));
+}
+
+.avatar-video {
+  grid-area: 1 / 1;
+  width: 100%;
+  height: 100%;
+  display: block;
+  object-fit: cover;
+  opacity: 0;
+  transition: opacity 0.18s ease;
+  pointer-events: none;
+}
+
+.avatar-video.active {
   opacity: 1;
-  box-shadow:
-    0 0 48px color-mix(in srgb, var(--avatar-state) 30%, transparent),
-    inset 0 0 34px rgba(255, 255, 255, 0.05);
-}
-
-.avatar-stage.state-listening .avatar-head,
-.avatar-stage.state-user-speaking .avatar-head {
-  transform: translateY(-3px);
-}
-
-.avatar-stage.state-user-speaking .avatar-halo {
-  animation: avatar-listen-pulse 1.3s ease-in-out infinite;
-}
-
-.avatar-stage.state-user-speaking .avatar-eye {
-  background: color-mix(in srgb, var(--listening) 70%, #10212a);
-  transform: scale(calc(1 + var(--audio-level, 0) * 0.22));
-}
-
-.avatar-stage.state-processing .avatar-eye,
-.avatar-stage.state-connecting .avatar-eye,
-.avatar-stage.state-queued .avatar-eye,
-.avatar-stage.state-your-turn .avatar-eye {
-  animation: avatar-think 1.15s ease-in-out infinite;
-}
-
-.avatar-stage.state-processing .avatar-mouth,
-.avatar-stage.state-connecting .avatar-mouth,
-.avatar-stage.state-queued .avatar-mouth,
-.avatar-stage.state-your-turn .avatar-mouth {
-  height: 5px;
-  width: 30px;
-  border-radius: 999px;
-}
-
-.avatar-stage.state-ai-speaking .avatar-presence {
-  animation-duration: 2.2s;
-}
-
-.avatar-stage.state-ai-speaking .avatar-head {
-  transform: translateY(-5px);
-  box-shadow:
-    0 28px 62px rgba(0, 0, 0, 0.4),
-    0 0 36px color-mix(in srgb, var(--speaking) 18%, transparent),
-    inset -18px -22px 42px rgba(51, 31, 45, 0.34),
-    inset 12px 14px 28px rgba(255, 255, 255, 0.13);
-}
-
-.avatar-stage.state-ai-speaking .avatar-mouth {
-  width: 36px;
-  height: calc(12px + (var(--ai-audio-level, 0.35) * 24px));
-  border-radius: 999px;
-  animation: avatar-talk 0.22s ease-in-out infinite alternate;
-}
-
-.avatar-stage.state-ai-speaking .avatar-eye {
-  background: color-mix(in srgb, var(--speaking) 60%, #10212a);
-}
-
-.avatar-stage.state-ai-speaking .avatar-signal {
-  opacity: 0.75;
-  animation: avatar-signal 0.9s ease-in-out infinite;
-}
-
-.avatar-stage.state-error .avatar-brow {
-  transform: rotate(0deg) translateY(3px);
-}
-
-.avatar-stage.state-error .avatar-mouth {
-  width: 30px;
-  height: 4px;
-  border-radius: 999px;
-}
-
-@keyframes avatar-breathe {
-  0%, 100% { transform: translateY(0) scale(1); }
-  50% { transform: translateY(-4px) scale(1.01); }
-}
-
-@keyframes avatar-listen-pulse {
-  0%, 100% { transform: scale(1); opacity: 0.88; }
-  50% { transform: scale(calc(1.02 + var(--audio-level, 0) * 0.08)); opacity: 1; }
-}
-
-@keyframes avatar-think {
-  0%, 100% { transform: translateX(-4px) scaleY(0.92); }
-  50% { transform: translateX(4px) scaleY(1); }
-}
-
-@keyframes avatar-talk {
-  0% {
-    height: calc(7px + (var(--ai-audio-level, 0.35) * 16px));
-    transform: translateX(-50%) scaleX(0.92);
-  }
-  100% {
-    height: calc(15px + (var(--ai-audio-level, 0.35) * 26px));
-    transform: translateX(-50%) scaleX(1.08);
-  }
-}
-
-@keyframes avatar-signal {
-  0%, 100% { opacity: 0.24; width: 24px; }
-  50% { opacity: 0.82; width: 44px; }
 }
 
 /* ─── Central circle ──────────────────────────────────────────────────── */
@@ -1060,11 +788,9 @@ a:hover {
 
 .circle {
   position: relative;
-  /* Cap by height as well as width (min(vw, vh)-style): in a short container
-   * the orb shrinks instead of overflowing, so the page stays scroll-free even
-   * when embedded in a small box. On normal screens the 320px cap still wins,
-   * so the desktop size is unchanged. */
-  width: clamp(140px, min(38vw, 46vh), 320px);
+  /* The video avatar is now the primary presence; the orb is the compact
+   * conversation control below it. */
+  width: clamp(96px, min(24vw, 23vh), 180px);
   aspect-ratio: 1 / 1;
   border-radius: 50%;
   border: none;
@@ -2468,8 +2194,7 @@ body.cam-on .footer {
   }
 
   .circle {
-    /* Height-capped like the base rule so a narrow AND short box still fits. */
-    width: clamp(130px, min(56vw, 52vh), 240px);
+    width: clamp(104px, min(36vw, 30vh), 160px);
   }
 
   /* In the column layout the side controls must collapse by HEIGHT, not
@@ -3027,21 +2752,7 @@ body.cam-on .footer {
 
 @media (max-width: 600px) {
   .avatar-stage {
-    width: min(300px, 78vw);
-    height: clamp(152px, 25vh, 205px);
-  }
-  .avatar-presence {
-    width: min(230px, 70vw);
-  }
-  .avatar-head {
-    width: clamp(116px, 34vw, 148px);
-    bottom: 40px;
-  }
-  .avatar-shoulders {
-    height: 58px;
-  }
-  .avatar-signal {
-    width: 28px;
+    width: min(330px, 78vw, 40vh);
   }
 }
 
@@ -3053,15 +2764,9 @@ body.cam-on .footer {
   .cam-pip.flash .cam-flash {
     animation: none;
   }
-  .avatar-presence,
-  .avatar-stage.state-user-speaking .avatar-halo,
-  .avatar-stage.state-processing .avatar-eye,
-  .avatar-stage.state-connecting .avatar-eye,
-  .avatar-stage.state-queued .avatar-eye,
-  .avatar-stage.state-your-turn .avatar-eye,
-  .avatar-stage.state-ai-speaking .avatar-mouth,
-  .avatar-stage.state-ai-speaking .avatar-signal {
-    animation: none;
+  .avatar-ring {
+    transition: none;
+    transform: none !important;
   }
 }
 
@@ -3137,12 +2842,8 @@ body.cam-on .footer {
   .ident-meta { gap: 5px; font-size: 13px; }
   .stage { padding: 12px 20px 16px; gap: 12px; }
   .footer { padding: 8px 24px 10px; }
-  .avatar-stage { height: clamp(146px, 24vh, 210px); }
-  .avatar-presence { width: min(238px, 56vw); }
-  .avatar-head { width: clamp(118px, 26vw, 152px); bottom: 40px; }
-  .avatar-neck { bottom: 27px; height: 38px; }
-  .avatar-shoulders { height: 58px; width: min(210px, 50vw); }
-  .circle { width: clamp(140px, min(38vw, 44vh), 300px); }
+  .avatar-stage { width: min(330px, 58vw, 39vh); }
+  .circle { width: clamp(96px, min(26vw, 22vh), 160px); }
 }
 
 @media (max-height: 560px) {
@@ -3154,15 +2855,8 @@ body.cam-on .footer {
   .ident-blurb { display: none; }
   .stage { padding: 8px 14px 10px; gap: 8px; }
   .footer { display: none; }
-  .avatar-stage { height: clamp(112px, 22vh, 150px); }
-  .avatar-presence { width: min(182px, 52vw); }
-  .avatar-head { width: clamp(86px, 22vw, 108px); bottom: 30px; }
-  .avatar-brow { width: 20px; }
-  .avatar-eye { width: 10px; height: 10px; }
-  .avatar-mouth { width: 28px; }
-  .avatar-neck { width: 34px; height: 30px; bottom: 21px; }
-  .avatar-shoulders { height: 42px; width: min(164px, 46vw); }
-  .circle { width: clamp(120px, min(50vw, 46vh), 240px); }
+  .avatar-stage { width: min(210px, 48vw, 33vh); }
+  .circle { width: clamp(84px, min(34vw, 24vh), 130px); }
 }
 .pipe-note {
   display: none;

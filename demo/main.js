@@ -325,6 +325,19 @@ const STATE_CLASS = {
   error: "state-error",
 };
 
+/** @type {Record<AppState, "standby" | "thinking" | "speaking">} */
+const AVATAR_VIDEO_BY_STATE = {
+  idle: "standby",
+  connecting: "thinking",
+  queued: "thinking",
+  "your-turn": "thinking",
+  listening: "standby",
+  "user-speaking": "standby",
+  processing: "thinking",
+  "ai-speaking": "speaking",
+  error: "standby",
+};
+
 /** @type {ReadonlySet<AppState>} */
 const LIVE_STATES = new Set(["listening", "user-speaking", "processing", "ai-speaking"]);
 
@@ -338,6 +351,8 @@ const circleSubcaption = $("#circle-subcaption");
 const orbWrap = $(".orb-wrap");
 /** @type {HTMLElement} */
 const avatarStage = $("#avatar-stage");
+/** @type {HTMLVideoElement[]} */
+const avatarVideos = Array.from(document.querySelectorAll("[data-avatar-video]"));
 /** @type {HTMLButtonElement} */
 const micBtn = $("#mic-btn");
 /** @type {HTMLButtonElement} */
@@ -620,12 +635,27 @@ let micStream = null;
 let micMuted = false;
 
 /** @param {AppState} next */
+function syncAvatarVideo(next) {
+  const activeKind = AVATAR_VIDEO_BY_STATE[next] || "standby";
+  for (const video of avatarVideos) {
+    const active = video.dataset.avatarVideo === activeKind;
+    video.classList.toggle("active", active);
+    if (active) {
+      void video.play().catch(() => {});
+    } else {
+      video.pause();
+    }
+  }
+}
+
+/** @param {AppState} next */
 function setState(next) {
   currentState = next;
   const view = STATE_VIEWS[next];
   circleBtn.disabled = view.disabled;
   circleBtn.className = `circle ${STATE_CLASS[next]}`;
   avatarStage.className = `avatar-stage ${STATE_CLASS[next]}`;
+  syncAvatarVideo(next);
   if (next !== "error") {
     const caption = next === "idle"
       ? (userName ? `Tap to talk, ${userName}` : "Tap to introduce yourself")
