@@ -5,6 +5,7 @@ from openai.types.realtime.realtime_audio_config_output import RealtimeAudioConf
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from speech_to_speech.LLM.chat import Chat
+from speech_to_speech.memory.local_memory import LocalMemoryStore
 
 
 def _apply_update(current: BaseModel, update: BaseModel) -> None:
@@ -38,6 +39,8 @@ class RuntimeConfig(BaseModel):
     model_config = ConfigDict(validate_assignment=True, arbitrary_types_allowed=True)
 
     chat: Chat = Field(default_factory=lambda: Chat(10))
+    memory_store: LocalMemoryStore | None = None
+    last_user_transcript: str = ""
     session: RealtimeSessionCreateRequest = Field(
         default_factory=lambda: RealtimeSessionCreateRequest(type="realtime"),
         validate_default=True,

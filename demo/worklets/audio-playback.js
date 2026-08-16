@@ -12,6 +12,8 @@
  *     { kind: "clear" }                                 wipe queue (barge-in)
  *
  *   worklet -> main:
+ *     { kind: "playback-started" }                    speaker output started
+ *     { kind: "playback-ended" }                      playback queue drained
  *     { kind: "stats", queuedMs, played }               every ~250 ms
  *     { kind: "underrun" }                              every time the queue
  *                                                      runs dry mid-playback
@@ -39,6 +41,7 @@ class AudioPlaybackProcessor extends AudioWorkletProcessor {
     this._fadeIn = 0;
     this._fadeOut = 0;
     this._lastSample = 0;
+    this._notifiedPlaying = false;
 
     this.port.onmessage = (e) => {
       const data = e.data;
@@ -57,6 +60,7 @@ class AudioPlaybackProcessor extends AudioWorkletProcessor {
               this._playing = true;
               this._fadeIn = FADE_FRAMES;
               this._fadeOut = 0;
+              this._notifyPlaybackStarted();
             }
           }
           break;
@@ -65,9 +69,22 @@ class AudioPlaybackProcessor extends AudioWorkletProcessor {
           this._readIdx = 0;
           this._fracPos = 0;
           this._fadeOut = FADE_FRAMES;
+          this._notifyPlaybackEnded();
           break;
       }
     };
+  }
+
+  _notifyPlaybackStarted() {
+    if (this._notifiedPlaying) return;
+    this._notifiedPlaying = true;
+    this.port.postMessage({ kind: "playback-started" });
+  }
+
+  _notifyPlaybackEnded() {
+    if (!this._notifiedPlaying) return;
+    this._notifiedPlaying = false;
+    this.port.postMessage({ kind: "playback-ended" });
   }
 
   _queuedSamples() {
@@ -127,6 +144,7 @@ class AudioPlaybackProcessor extends AudioWorkletProcessor {
             this._playing = false;
             this._lastSample = 0;
             this.port.postMessage({ kind: "underrun" });
+            this._notifyPlaybackEnded();
           }
         } else {
           sample = v;
@@ -146,6 +164,7 @@ class AudioPlaybackProcessor extends AudioWorkletProcessor {
           if (this._fadeOut === 0) {
             this._playing = false;
             this._lastSample = 0;
+            this._notifyPlaybackEnded();
           }
         }
 

@@ -70,6 +70,45 @@
       </header>
 
       <main class="stage">
+        <section id="avatar-stage" class="avatar-stage state-idle" aria-label="Assistant avatar">
+          <div class="avatar-ring" aria-hidden="true">
+            <video
+              class="avatar-video active"
+              data-avatar-video="standby"
+              src="assets/avatars/alice/standby.mp4"
+              loop
+              muted
+              autoplay
+              playsinline
+              preload="auto"
+            ></video>
+            <video
+              class="avatar-video"
+              data-avatar-video="thinking"
+              src="assets/avatars/alice/thinking.mp4"
+              loop
+              muted
+              playsinline
+              preload="auto"
+            ></video>
+            <video
+              class="avatar-video"
+              data-avatar-video="speaking"
+              src="assets/avatars/alice/speaking.mp4"
+              loop
+              muted
+              playsinline
+              preload="auto"
+            ></video>
+            <video
+              id="avatar-generated-video"
+              class="avatar-generated-video"
+              playsinline
+              preload="auto"
+            ></video>
+          </div>
+        </section>
+
         <div class="orb-wrap">
           <div id="mic-gate" class="mic-gate">
             <svg id="mic-gate-arc" class="mic-gate-arc" viewBox="0 0 100 100" aria-hidden="true">
@@ -209,7 +248,7 @@
               <span class="pipe-job">speaks it back</span>
               <a class="pipe-model" href="https://huggingface.co/Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice" target="_blank" rel="noopener">Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice<svg class="ext" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 17 17 7"/><path d="M8 7h9v9"/></svg></a>
             </li>
-            <li class="pipe-endpoint">The orb replies</li>
+            <li class="pipe-endpoint">The avatar replies</li>
           </ol>
         </div>
       </div>
@@ -230,6 +269,7 @@
               <div><span>LLM</span><strong id="settings-model">Gemma 4</strong></div>
               <div><span>Provider</span><strong id="settings-provider">Ollama</strong></div>
               <div><span>Speech</span><strong>Parakeet → Qwen3-TTS</strong></div>
+              <div><span>Local extras</span><strong id="settings-features">None</strong></div>
               <small>Change the LLM provider and model in <code>local-models.env</code>, then restart the local server.</small>
             </div>
             <label class="field" id="conn-field">

@@ -53,6 +53,9 @@ The browser UI and realtime API also bind to `127.0.0.1`. With model weights alr
 - **Local Gemma 4:** defaults to `gemma4:e4b` through Ollama.
 - **Choose your runtime:** configure Ollama, LM Studio, or native MLX in one file.
 - **Realtime voice:** streaming transcription, response generation, and speech synthesis.
+- **Lower-latency speech:** streamed LLM output is sent to TTS sentence by sentence by default.
+- **Optional wake word:** keep the mic open but only answer after phrases such as “hey Alice.”
+- **Optional service-backed lip sync:** hand completed assistant audio to a local video renderer and play the returned MP4 avatar response.
 - **Personal from the first hello:** the assistant asks for your name by voice and remembers it only in browser local storage.
 - **Transparent configuration:** the UI shows the active LLM, provider, speech models, transport, and privacy state.
 - **Offline-safe transport:** WebSocket is the default because localhost survives when Wi-Fi is disabled.
@@ -122,6 +125,60 @@ S2S_LLM_BASE_URL=http://127.0.0.1:11434/v1
 S2S_LLM_API_KEY=ollama
 ```
 
+Optional wake-word mode can be enabled in the same file:
+
+```dotenv
+S2S_WAKE_WORD_ENABLED=true
+S2S_WAKE_WORDS=hey alice,okay assistant
+S2S_WAKE_WORD_STRIP=true
+```
+
+When enabled, final transcripts are still shown in the UI, but the assistant only
+responds after one of the configured phrases is heard. With stripping enabled,
+“hey Alice, what time is it?” is sent to the LLM as “what time is it?”.
+
+Optional local custom tools can also be enabled from `local-models.env`:
+
+```dotenv
+S2S_CUSTOM_TOOLS_ENABLED=true
+S2S_CUSTOM_TOOLS_PATH=user-customization/custom-tools.json
+S2S_CUSTOM_TOOLS_TIMEOUT_S=10
+```
+
+Each enabled tool is a JSON function schema backed by a Python script inside the
+same customization folder. Scripts receive `{"args": ..., "tool": ...}` on
+stdin and return plain text or JSON on stdout. The server validates that script
+paths stay inside the customization folder, runs them with a timeout, appends the
+tool result to the private conversation, and queues the follow-up response.
+
+Local memory is also optional and explicit:
+
+```dotenv
+S2S_MEMORY_ENABLED=true
+S2S_MEMORY_PATH=user-customization/memories.json
+S2S_MEMORY_MAX_PROMPT_ITEMS=8
+```
+
+When enabled, phrases like “remember that my preferred editor is Neovim” are
+stored locally and relevant facts are injected into later LLM prompts.
+
+Real lip sync requires a separate local renderer such as a Wav2Lip- or
+MuseTalk-style service. Enable the integration by setting:
+
+```dotenv
+S2S_LIPSYNC_URL=http://127.0.0.1:9000/lipsync
+```
+
+When configured, the WebSocket UI stops immediate assistant audio playback,
+collects the completed response as a WAV file, posts multipart/form-data to
+`/api/lipsync`, and plays the returned MP4 in the avatar ring. The upstream
+service should accept `audio`, `transcript`, `response_id`, and `avatar` fields
+and return either `video/mp4` bytes or JSON containing `video_url`/`url`.
+
+This mode trades realtime latency for real rendered video. WebRTC mode still
+uses the regular Alice-style loops because its assistant audio arrives as a
+remote media track rather than discrete TTS chunks.
+
 Supported providers:
 
 | Provider | Runtime | Default endpoint |
@@ -169,6 +226,8 @@ Browser echo cancellation works best when microphone and speaker output belong t
 - Added WebRTC lifecycle and browser audio improvements.
 - Reworked the UI around local privacy and active model configuration.
 - Added spoken name onboarding and local-only personalization.
+- Added optional transcript-level wake-word gating for always-listening local use.
+- Added optional local custom tools and explicit local memory.
 - Added an optional loopback-only macOS action broker with a strict tool
   allowlist and native confirmations for consequential actions.
 - Removed external fonts and hosted-service branding from the runtime UI.

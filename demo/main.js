@@ -325,6 +325,19 @@ const STATE_CLASS = {
   error: "state-error",
 };
 
+/** @type {Record<AppState, "standby" | "thinking" | "speaking">} */
+const AVATAR_VIDEO_BY_STATE = {
+  idle: "standby",
+  connecting: "thinking",
+  queued: "thinking",
+  "your-turn": "thinking",
+  listening: "standby",
+  "user-speaking": "standby",
+  processing: "thinking",
+  "ai-speaking": "speaking",
+  error: "standby",
+};
+
 /** @type {ReadonlySet<AppState>} */
 const LIVE_STATES = new Set(["listening", "user-speaking", "processing", "ai-speaking"]);
 
@@ -336,6 +349,12 @@ const circleCaption = $("#circle-caption");
 const circleSubcaption = $("#circle-subcaption");
 /** @type {HTMLElement} */
 const orbWrap = $(".orb-wrap");
+/** @type {HTMLElement} */
+const avatarStage = $("#avatar-stage");
+/** @type {HTMLVideoElement[]} */
+const avatarVideos = Array.from(document.querySelectorAll("[data-avatar-video]"));
+/** @type {HTMLVideoElement} */
+const avatarGeneratedVideo = $("#avatar-generated-video");
 /** @type {HTMLButtonElement} */
 const micBtn = $("#mic-btn");
 /** @type {HTMLButtonElement} */
@@ -439,7 +458,16 @@ if (userName && !isPlausibleName(userName)) {
 }
 /** @type {"idle" | "assistant-asking" | "awaiting-name" | "complete"} */
 let onboardingPhase = userName ? "complete" : "idle";
-let localConfig = { llmProvider: "local", llmModel: "Local model", sttModel: "Parakeet TDT", ttsModel: "Local voice" };
+let localConfig = {
+  llmProvider: "local",
+  llmModel: "Local model",
+  sttModel: "Parakeet TDT",
+  ttsModel: "Local voice",
+  wakeWord: false,
+  customTools: false,
+  memory: false,
+  lipSync: false,
+};
 
 // ── Connection target ────────────────────────────────────────────────────────
 // Three modes, decided by the deploy via /api/config:
@@ -461,6 +489,7 @@ let pinnedUrl = "";
 // Whether the deploy offers the WebRTC transport (/api/config `rtc`; true
 // exactly when the URL is env-pinned, since /api/calls only forwards there).
 let rtcAvailable = false;
+let lipSyncEndpoint = "";
 /** @type {RTCIceServer[]} STUN/TURN servers for the browser peer connection
  * (deploy-provided via RTC_ICE_SERVERS; empty -> host candidates only). */
 let iceServers = [];
@@ -544,6 +573,12 @@ function applyLocalBranding() {
   profileProvider.textContent = localConfig.llmProvider;
   $("#settings-model").textContent = localConfig.llmModel;
   $("#settings-provider").textContent = localConfig.llmProvider;
+  const features = [];
+  if (localConfig.wakeWord) features.push("Wake word");
+  if (localConfig.customTools) features.push("Custom tools");
+  if (localConfig.memory) features.push("Memory");
+  if (localConfig.lipSync) features.push("Lip sync video");
+  $("#settings-features").textContent = features.length ? features.join(" · ") : "None";
   const footer = $("#personal-footer");
   footer.textContent = userName
     ? `Private to ${userName} · on-device · offline-ready`
@@ -603,6 +638,100 @@ let client = null;
 /** @type {MediaStream | null} */
 let micStream = null;
 let micMuted = false;
+/** @type {"standby" | "thinking" | "speaking"} */
+let activeAvatarVideo = "standby";
+let activeGeneratedAvatarUrl = "";
+
+/**
+ * @param {"standby" | "thinking" | "speaking"} activeKind
+ * @param {{ restart?: boolean }} [opts]
+ */
+function setAvatarVideo(activeKind, opts = {}) {
+  clearGeneratedAvatarVideo();
+  const changed = activeAvatarVideo !== activeKind;
+  activeAvatarVideo = activeKind;
+  for (const video of avatarVideos) {
+    const active = video.dataset.avatarVideo === activeKind;
+    video.classList.toggle("active", active);
+    if (active) {
+      if (changed && opts.restart !== false) {
+        try { video.currentTime = 0; } catch { /* ignored */ }
+      }
+      void video.play().catch(() => {});
+    } else {
+      video.pause();
+    }
+  }
+}
+
+function clearGeneratedAvatarVideo() {
+  avatarGeneratedVideo.pause();
+  avatarGeneratedVideo.classList.remove("active");
+  avatarGeneratedVideo.removeAttribute("src");
+  avatarGeneratedVideo.load();
+  if (activeGeneratedAvatarUrl) {
+    URL.revokeObjectURL(activeGeneratedAvatarUrl);
+    activeGeneratedAvatarUrl = "";
+  }
+}
+
+/**
+ * @param {string} src
+ * @param {{ revoke?: boolean }} [opts]
+ */
+async function playGeneratedAvatarVideo(src, opts = {}) {
+  setState("ai-speaking");
+  for (const video of avatarVideos) video.pause();
+  avatarGeneratedVideo.classList.add("active");
+  avatarGeneratedVideo.src = src;
+  avatarGeneratedVideo.currentTime = 0;
+  avatarGeneratedVideo.muted = false;
+  avatarGeneratedVideo.onended = () => {
+    clearGeneratedAvatarVideo();
+    if (client) setState("listening");
+  };
+  avatarGeneratedVideo.onerror = () => {
+    clearGeneratedAvatarVideo();
+    if (client) setState("listening");
+  };
+  if (opts.revoke) activeGeneratedAvatarUrl = src;
+  await avatarGeneratedVideo.play();
+}
+
+/**
+ * @param {{ responseId: string; audio: Blob; transcript?: string }} detail
+ */
+async function renderLipSyncResponse(detail) {
+  if (!lipSyncEndpoint || !detail.audio) return;
+  setState("processing");
+  const form = new FormData();
+  form.append("audio", detail.audio, `${detail.responseId || "assistant"}.wav`);
+  form.append("response_id", detail.responseId || "");
+  form.append("transcript", detail.transcript || "");
+  form.append("avatar", "alice");
+
+  const res = await fetch(lipSyncEndpoint, { method: "POST", body: form });
+  if (!res.ok) throw new Error(`Lip sync render failed (${res.status})`);
+
+  const contentType = res.headers.get("content-type") || "";
+  if (contentType.includes("application/json")) {
+    const json = await res.json();
+    const url = json.video_url || json.url;
+    if (!url) throw new Error("Lip sync service returned JSON without video_url");
+    await playGeneratedAvatarVideo(url);
+    return;
+  }
+
+  const videoBlob = await res.blob();
+  const objectUrl = URL.createObjectURL(videoBlob);
+  await playGeneratedAvatarVideo(objectUrl, { revoke: true });
+}
+
+/** @param {AppState} next */
+function syncAvatarVideo(next) {
+  const activeKind = AVATAR_VIDEO_BY_STATE[next] || "standby";
+  setAvatarVideo(activeKind);
+}
 
 /** @param {AppState} next */
 function setState(next) {
@@ -610,6 +739,8 @@ function setState(next) {
   const view = STATE_VIEWS[next];
   circleBtn.disabled = view.disabled;
   circleBtn.className = `circle ${STATE_CLASS[next]}`;
+  avatarStage.className = `avatar-stage ${STATE_CLASS[next]}`;
+  syncAvatarVideo(next);
   if (next !== "error") {
     const caption = next === "idle"
       ? (userName ? `Tap to talk, ${userName}` : "Tap to introduce yourself")
@@ -619,6 +750,7 @@ function setState(next) {
 
   const live = LIVE_STATES.has(next);
   orbWrap.classList.toggle("live", live);
+  avatarStage.classList.toggle("live", live);
   micBtn.setAttribute("aria-hidden", live ? "false" : "true");
   stopBtn.setAttribute("aria-hidden", live ? "false" : "true");
   micBtn.tabIndex = live ? 0 : -1;
@@ -1164,12 +1296,17 @@ async function fetchConfig() {
       // WebRTC transport: offered only when the deploy pins the URL (the
       // /api/calls proxy refuses to forward anywhere else).
       rtcAvailable = !!json.rtc;
+      lipSyncEndpoint = (json.lipSyncEndpoint || "").trim();
       iceServers = Array.isArray(json.iceServers) ? json.iceServers : [];
       localConfig = {
         llmProvider: json.llmProvider || "local",
         llmModel: json.llmModel || "Local model",
         sttModel: json.sttModel || "Parakeet TDT",
         ttsModel: json.ttsModel || "Local voice",
+        wakeWord: !!json.wakeWord,
+        customTools: !!json.customTools,
+        memory: !!json.memory,
+        lipSync: !!json.lipSync,
       };
       // The conversation-time limiter rides on the LB being present.
       limiterOn = lbMode;
@@ -1591,6 +1728,7 @@ async function doStart(audioContext = null) {
     : new S2sWsRealtimeClient({
         ...target,
         noiseGate: gateParams(settings.noiseGate),
+        lipSync: !!lipSyncEndpoint,
         ...common,
       });
   client = c;
@@ -1646,6 +1784,14 @@ async function doStart(audioContext = null) {
       onboardingPhase = "awaiting-name";
       setCaption("Say your name");
     }
+  });
+
+  c.addEventListener("lipsync-audio", (e) => {
+    const detail = /** @type {CustomEvent<{ responseId: string; audio: Blob; transcript?: string }>} */ (e).detail;
+    void renderLipSyncResponse(detail).catch((err) => {
+      console.warn("[main] lip sync render failed:", err);
+      if (client) setState("listening");
+    });
   });
 
   c.addEventListener("toolcall", (e) => {

@@ -28,9 +28,9 @@
  *     only needs to flip the UI state here.
  *
  * Because no audio events exist, "the assistant is audibly speaking" is
- * detected from the output analyser's RMS (with a short hang time), and
- * `response.done` / `speech_started` remain the authoritative exits — the
- * same status contract the WS client exposes.
+ * detected from the output analyser's RMS (with a short hang time). We do not
+ * leave the speaking UI on `response.done` until the remote track goes quiet,
+ * because buffered media can still be playing after the protocol response ends.
  *
  * @typedef {"idle" | "connecting" | "connected" | "user-speaking" |
  *           "processing" | "ai-speaking" | "closed" | "error"
@@ -401,6 +401,11 @@ export class S2sRtcRealtimeClient extends EventTarget {
       this._aiSpeaking = true;
       if (this._activeResponseId) this._audibleResponses.add(this._activeResponseId);
       this._markAudible();
+    } else if (!audible && this._aiSpeaking) {
+      this._aiSpeaking = false;
+      if (this._status === "ai-speaking") {
+        this._setStatus(this._openResponses > 0 ? "processing" : "connected");
+      }
     }
 
   }
@@ -468,10 +473,8 @@ export class S2sRtcRealtimeClient extends EventTarget {
         break;
 
       case "response.done": {
-        this._aiSpeaking = false;
-        this._lastAudibleAt = 0;
         this._openResponses = Math.max(0, this._openResponses - 1);
-        if (this._status === "ai-speaking" || this._status === "processing") {
+        if (this._status === "processing" || (this._status === "ai-speaking" && !this._aiSpeaking)) {
           this._setStatus("connected");
         }
         // Completion AND cancellation both arrive as response.done (status
@@ -546,7 +549,6 @@ export class S2sRtcRealtimeClient extends EventTarget {
 
       case "response.audio_transcript.delta":
       case "response.output_audio_transcript.delta": {
-        this._markAudible();
         const rid = typeof event.response_id === "string" ? event.response_id : "";
         const delta = typeof event.delta === "string" ? event.delta : "";
         if (delta) {

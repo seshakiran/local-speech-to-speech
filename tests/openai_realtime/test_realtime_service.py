@@ -6,6 +6,7 @@ validated for correct type, attributes, and state transitions.
 
 import base64
 import json
+from pathlib import Path
 from queue import Queue
 from threading import Event, Thread
 from time import sleep
@@ -33,6 +34,10 @@ from openai.types.realtime import (
     SessionCreatedEvent,
     SessionUpdateEvent,
 )
+from openai.types.realtime.realtime_conversation_item_function_call import (
+    RealtimeConversationItemFunctionCall,
+)
+from openai.types.responses import ResponseFunctionToolCall
 
 from speech_to_speech.api.openai_realtime.service import (
     CHUNK_SIZE_BYTES,
@@ -49,6 +54,7 @@ from speech_to_speech.pipeline.events import (
 )
 from speech_to_speech.pipeline.messages import GenerateResponseRequest
 from speech_to_speech.pipeline.speculative_turns import SpeculativeTurnTracker
+from speech_to_speech.tools.custom_tools import CustomTool, CustomToolHandler, CustomToolRegistry
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -66,6 +72,27 @@ def _b64_pcm(n_samples: int) -> str:
 
 def _make_audio_append(audio_b64: str) -> InputAudioBufferAppendEvent:
     return InputAudioBufferAppendEvent(type="input_audio_buffer.append", audio=audio_b64)
+
+
+def _custom_registry(output: str = '{"ok": true}') -> CustomToolRegistry:
+    def runner(command, **kwargs):
+        import subprocess
+
+        return subprocess.CompletedProcess(command, 0, stdout=output, stderr="")
+
+    return CustomToolRegistry(
+        root=Path.cwd(),
+        tools=[
+            CustomTool(
+                name="local_demo",
+                description="Runs locally.",
+                parameters={"type": "object", "properties": {}, "additionalProperties": False},
+                enabled=True,
+                handler=CustomToolHandler(type="script", entry="README.md", runtime="python"),
+            )
+        ],
+        runner=runner,
+    )
 
 
 # ===================================================================
@@ -88,6 +115,21 @@ class TestConnectionLifecycle:
         service.unregister(sid)
         with pytest.raises(KeyError):
             service._state(sid)
+
+    def test_custom_tools_are_added_to_session_on_register(self, text_prompt_queue, should_listen):
+        service = RealtimeService(
+            text_prompt_queue=text_prompt_queue,
+            should_listen=should_listen,
+            custom_tools=_custom_registry(),
+        )
+        sid = service.register()
+        try:
+            tools = service._state(sid).runtime_config.session.tools
+            assert tools is not None
+            names = {getattr(tool, "name", None) or tool.get("name") for tool in tools}
+            assert "local_demo" in names
+        finally:
+            service.unregister(sid)
 
     def test_build_session_created(self, service, conn_id, runtime_config):
         service.handle_session_update(
@@ -217,6 +259,30 @@ class TestHandleSessionUpdate:
         service.handle_session_update(conn_id, self._make_update(tools=tools, tool_choice="required"))
         assert runtime_config.session.tools is not None
         assert runtime_config.session.tool_choice == "required"
+
+    def test_session_update_keeps_server_custom_tools(self, runtime_config, should_listen):
+        text_prompt_queue = Queue()
+        service = RealtimeService(
+            text_prompt_queue=text_prompt_queue,
+            should_listen=should_listen,
+            custom_tools=_custom_registry(),
+        )
+        conn_id = service.register()
+        service._state(conn_id).runtime_config = runtime_config
+        service.apply_custom_tools(conn_id)
+
+        try:
+            service.handle_session_update(
+                conn_id,
+                self._make_update(tools=[{"type": "function", "name": "client_tool"}], tool_choice="auto"),
+            )
+
+            tools = runtime_config.session.tools
+            assert tools is not None
+            names = {getattr(tool, "name", None) or tool.get("name") for tool in tools}
+            assert {"client_tool", "local_demo"} <= names
+        finally:
+            service.unregister(conn_id)
 
     def test_session_update_rejects_transcription_session(self, service, conn_id, runtime_config):
         raw = {
@@ -969,6 +1035,59 @@ class TestDispatchPipelineEvent:
         assert isinstance(events[0], ResponseFunctionCallArgumentsDoneEvent)
         assert events[0].output_index == 0
 
+    def test_local_custom_tool_is_suppressed_and_followup_is_queued(self, runtime_config, should_listen):
+        text_prompt_queue = Queue()
+        service = RealtimeService(
+            text_prompt_queue=text_prompt_queue,
+            should_listen=should_listen,
+            custom_tools=_custom_registry('{"answer": 42}'),
+        )
+        conn_id = service.register()
+        service._state(conn_id).runtime_config = runtime_config
+        service.apply_custom_tools(conn_id)
+        runtime_config.chat.add_item(
+            RealtimeConversationItemFunctionCall(
+                type="function_call",
+                call_id="call_local",
+                id="fc_local",
+                name="local_demo",
+                arguments='{"x": 1}',
+                status="completed",
+            )
+        )
+
+        try:
+            events = service.dispatch_pipeline_event(
+                conn_id,
+                AssistantTextEvent(
+                    text="",
+                    tools=[
+                        ResponseFunctionToolCall(
+                            type="function_call",
+                            call_id="call_local",
+                            id="fc_local",
+                            name="local_demo",
+                            arguments='{"x": 1}',
+                            status="completed",
+                        )
+                    ],
+                ),
+            )
+
+            assert not any(isinstance(event, ResponseFunctionCallArgumentsDoneEvent) for event in events)
+
+            done_events = service.finish_response(conn_id)
+
+            assert any(isinstance(event, ConversationItemCreatedEvent) for event in done_events)
+            assert runtime_config.chat.buffer[-1].type == "function_call_output"
+            assert json.loads(runtime_config.chat.buffer[-1].output) == {"answer": 42}
+            req = text_prompt_queue.get_nowait()
+            assert isinstance(req, GenerateResponseRequest)
+            assert req.runtime_config is runtime_config
+            assert service._state(conn_id).response_pending is True
+        finally:
+            service.unregister(conn_id)
+
     def test_assistant_text_text_only_emits_text_events(self, service, conn_id):
         from openai.types.realtime.realtime_response_create_params import RealtimeResponseCreateParams
 
@@ -1274,6 +1393,58 @@ class TestDispatchPipelineEvent:
         assert text_prompt_queue.empty()
         assert runtime_config.chat.buffer == []
         assert service._state(conn_id).response_pending is False
+
+    def test_wake_word_gate_ignores_transcript_without_trigger(self, runtime_config, should_listen):
+        text_prompt_queue = Queue()
+        service = RealtimeService(
+            text_prompt_queue=text_prompt_queue,
+            should_listen=should_listen,
+            wake_word_enabled=True,
+            wake_words="hey alice",
+        )
+        conn_id = service.register()
+        service._state(conn_id).runtime_config = runtime_config
+        should_listen.clear()
+
+        try:
+            events = service.dispatch_pipeline_event(
+                conn_id,
+                TranscriptionCompletedEvent(transcript="what time is it", language_code="en"),
+            )
+
+            assert len(events) == 1
+            assert isinstance(events[0], ConversationItemInputAudioTranscriptionCompletedEvent)
+            assert events[0].transcript == "what time is it"
+            assert text_prompt_queue.empty()
+            assert runtime_config.chat.buffer == []
+            assert service._state(conn_id).response_pending is False
+            assert should_listen.is_set()
+        finally:
+            service.unregister(conn_id)
+
+    def test_wake_word_gate_strips_trigger_before_realtime_generation(self, runtime_config, should_listen):
+        text_prompt_queue = Queue()
+        service = RealtimeService(
+            text_prompt_queue=text_prompt_queue,
+            should_listen=should_listen,
+            wake_word_enabled=True,
+            wake_words="hey alice",
+        )
+        conn_id = service.register()
+        service._state(conn_id).runtime_config = runtime_config
+
+        try:
+            service.dispatch_pipeline_event(
+                conn_id,
+                TranscriptionCompletedEvent(transcript="Hey Alice, what time is it?", language_code="en"),
+            )
+
+            req = text_prompt_queue.get_nowait()
+            assert isinstance(req, GenerateResponseRequest)
+            assert runtime_config.chat.buffer[0].content[0].text == "what time is it?"
+            assert service._state(conn_id).response_pending is True
+        finally:
+            service.unregister(conn_id)
 
     def test_revised_transcription_replaces_speculative_user_message(self, runtime_config, should_listen):
         text_prompt_queue = Queue()

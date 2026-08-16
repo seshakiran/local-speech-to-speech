@@ -40,6 +40,7 @@ from speech_to_speech.LLM.chat import (
     make_user_message,
 )
 from speech_to_speech.LLM.compaction_prompt import CompactGenerateFn, build_compactor
+from speech_to_speech.LLM.memory_prompt import apply_memory_context
 from speech_to_speech.LLM.text_prompt import build_text_system_prompt
 from speech_to_speech.LLM.tool_call.function_call import extract_function_calls_from_text
 from speech_to_speech.LLM.tool_call.function_tool import FunctionTool
@@ -165,7 +166,7 @@ class BaseLanguageModelHandler(BaseHandler[LLMIn, LLMOut], ABC):
         speculative_turns: SpeculativeTurnTracker | None = None,
         backend: Literal["transformers", "mlx"] = "transformers",
         enable_thinking: bool = False,
-        stream_batch_sentences: int = 3,
+        stream_batch_sentences: int = 1,
         enable_lang_prompt: bool = False,
         compact_history: bool = False,
         **_kwargs: Any,
@@ -264,7 +265,11 @@ class BaseLanguageModelHandler(BaseHandler[LLMIn, LLMOut], ABC):
 
         raw_tools = raw_tools or []
 
-        function_tools = [FunctionTool(**t.model_dump()) for t in raw_tools if t.type == "function"]
+        function_tools = []
+        for tool in raw_tools:
+            tool_data = tool if isinstance(tool, dict) else tool.model_dump()
+            if tool_data.get("type") == "function":
+                function_tools.append(FunctionTool(**tool_data))
 
         build_system_prompt = build_voice_system_prompt if wants_audio else build_text_system_prompt
 
@@ -528,6 +533,7 @@ class BaseLanguageModelHandler(BaseHandler[LLMIn, LLMOut], ABC):
         )
         tools = response.tools if response and response.tools else runtime_config.session.tools
         tool_choice = response.tool_choice if response and response.tool_choice else runtime_config.session.tool_choice
+        apply_memory_context(active_chat, runtime_config)
         self._apply_instructions(
             active_chat,
             instructions,

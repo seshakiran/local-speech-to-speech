@@ -690,10 +690,95 @@ a:hover {
   align-items: center;
   justify-content: center;
   padding: 24px 24px 32px;
-  gap: 20px;
+  gap: 14px;
   /* Let the stage shrink inside the grid's 1fr row so a height-capped orb can
    * give back space rather than forcing the whole app to overflow. */
   min-height: 0;
+}
+
+/* ─── Talking avatar ──────────────────────────────────────────────────── */
+
+.avatar-stage {
+  --avatar-state: var(--text-faint);
+  width: clamp(230px, min(52vw, 45vh), 430px);
+  aspect-ratio: 1 / 1;
+  display: grid;
+  place-items: center;
+  position: relative;
+  flex: none;
+  transition: filter 0.25s ease, transform 0.25s ease;
+}
+
+.avatar-ring {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  border-radius: 50%;
+  background: #050505;
+  border: 2px solid color-mix(in srgb, var(--avatar-state) 72%, rgba(255, 255, 255, 0.18));
+  box-shadow:
+    0 0 0 2px rgba(255, 255, 255, 0.05),
+    0 0 46px color-mix(in srgb, var(--avatar-state) 22%, transparent),
+    0 26px 70px rgba(0, 0, 0, 0.42);
+  display: grid;
+  place-items: center;
+  transition: border-color 0.25s ease, box-shadow 0.25s ease, transform 0.25s ease;
+}
+
+.avatar-stage.state-listening,
+.avatar-stage.state-user-speaking {
+  --avatar-state: var(--listening);
+}
+
+.avatar-stage.state-processing,
+.avatar-stage.state-queued,
+.avatar-stage.state-your-turn {
+  --avatar-state: var(--processing);
+}
+
+.avatar-stage.state-ai-speaking {
+  --avatar-state: var(--speaking);
+}
+
+.avatar-stage.state-error {
+  --avatar-state: var(--error);
+}
+
+.avatar-stage.live .avatar-ring {
+  box-shadow:
+    0 0 0 2px rgba(255, 255, 255, 0.06),
+    0 0 58px color-mix(in srgb, var(--avatar-state) 36%, transparent),
+    0 28px 76px rgba(0, 0, 0, 0.48);
+}
+
+.avatar-stage.state-user-speaking .avatar-ring {
+  transform: scale(calc(1 + var(--audio-level, 0) * 0.025));
+}
+
+.avatar-stage.state-ai-speaking .avatar-ring {
+  transform: scale(calc(1 + var(--ai-audio-level, 0) * 0.025));
+}
+
+.avatar-video,
+.avatar-generated-video {
+  grid-area: 1 / 1;
+  width: 100%;
+  height: 100%;
+  display: block;
+  object-fit: cover;
+  opacity: 0;
+  transition: opacity 0.18s ease;
+  pointer-events: none;
+}
+
+.avatar-video.active,
+.avatar-generated-video.active {
+  opacity: 1;
+}
+
+.avatar-generated-video {
+  z-index: 3;
 }
 
 /* ─── Central circle ──────────────────────────────────────────────────── */
@@ -709,11 +794,9 @@ a:hover {
 
 .circle {
   position: relative;
-  /* Cap by height as well as width (min(vw, vh)-style): in a short container
-   * the orb shrinks instead of overflowing, so the page stays scroll-free even
-   * when embedded in a small box. On normal screens the 320px cap still wins,
-   * so the desktop size is unchanged. */
-  width: clamp(140px, min(38vw, 46vh), 320px);
+  /* The video avatar is now the primary presence; the orb is the compact
+   * conversation control below it. */
+  width: clamp(96px, min(24vw, 23vh), 180px);
   aspect-ratio: 1 / 1;
   border-radius: 50%;
   border: none;
@@ -2117,8 +2200,7 @@ body.cam-on .footer {
   }
 
   .circle {
-    /* Height-capped like the base rule so a narrow AND short box still fits. */
-    width: clamp(130px, min(56vw, 52vh), 240px);
+    width: clamp(104px, min(36vw, 30vh), 160px);
   }
 
   /* In the column layout the side controls must collapse by HEIGHT, not
@@ -2673,6 +2755,13 @@ body.cam-on .footer {
     display: none;
   }
 }
+
+@media (max-width: 600px) {
+  .avatar-stage {
+    width: min(330px, 78vw, 40vh);
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .cam-pip {
     transition: opacity 0.22s ease;
@@ -2680,6 +2769,10 @@ body.cam-on .footer {
   }
   .cam-pip.flash .cam-flash {
     animation: none;
+  }
+  .avatar-ring {
+    transition: none;
+    transform: none !important;
   }
 }
 
@@ -2755,7 +2848,8 @@ body.cam-on .footer {
   .ident-meta { gap: 5px; font-size: 13px; }
   .stage { padding: 12px 20px 16px; gap: 12px; }
   .footer { padding: 8px 24px 10px; }
-  .circle { width: clamp(140px, min(38vw, 44vh), 300px); }
+  .avatar-stage { width: min(330px, 58vw, 39vh); }
+  .circle { width: clamp(96px, min(26vw, 22vh), 160px); }
 }
 
 @media (max-height: 560px) {
@@ -2767,7 +2861,8 @@ body.cam-on .footer {
   .ident-blurb { display: none; }
   .stage { padding: 8px 14px 10px; gap: 8px; }
   .footer { display: none; }
-  .circle { width: clamp(120px, min(50vw, 46vh), 240px); }
+  .avatar-stage { width: min(210px, 48vw, 33vh); }
+  .circle { width: clamp(84px, min(34vw, 24vh), 130px); }
 }
 .pipe-note {
   display: none;
